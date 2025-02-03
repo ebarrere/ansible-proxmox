@@ -1,4 +1,15 @@
 ---
+- name: Ensure ca-certificates is installed
+  ansible.builtin.apt:
+    name: ca-certificates
+    state: present
+
+- name: Download Proxmox GPG key
+  ansible.builtin.get_url:
+    url: https://enterprise.proxmox.com/debian/proxmox-release-{{ debian_version }}.gpg
+    dest: /etc/apt/trusted.gpg.d/proxmox-release-{{ debian_version }}.gpg
+    mode: '0644'
+
 - name: Remove pve-enterprise repository
   ansible.builtin.apt_repository:
     repo: deb https://enterprise.proxmox.com/debian/pve {{ debian_version }} pve-enterprise

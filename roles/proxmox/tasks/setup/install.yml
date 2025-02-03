@@ -1,0 +1,6 @@
+---
+- name: Install Proxmox VE Community Edition
+  ansible.builtin.apt:
+    name: proxmox-ve
+    state: present
+    update_cache: true

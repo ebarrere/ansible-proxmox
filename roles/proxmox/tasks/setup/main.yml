@@ -1,4 +1,12 @@
 ---
+- name: Add proxmox apt repo
+  ansible.builtin.import_tasks: switch_to_community_updates_repo.yml
+  when: install_proxmox | d(false)
+
+- name: Ensure Proxmox is installed
+  ansible.builtin.import_tasks: install.yml
+  when: install_proxmox | d(false)
+
 - name: Switch to community APT repo
   ansible.builtin.import_tasks: switch_to_community_updates_repo.yml
   when: switch_to_community_updates_repo

@@ -10,8 +10,13 @@ server {
 server {
     listen 443 ssl;
     server_name _;
+    {% if enable_acme %}
     ssl_certificate /etc/pve/local/pveproxy-ssl.pem;
     ssl_certificate_key /etc/pve/local/pveproxy-ssl.key;
+    {% else %}
+    ssl_certificate /etc/pve/local/pve-ssl.pem;
+    ssl_certificate_key /etc/pve/local/pve-ssl.key;
+    {% endif %}
     proxy_redirect off;
     location / {
         proxy_http_version 1.1;

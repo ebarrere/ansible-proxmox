@@ -1,0 +1,47 @@
+---
+- name: Install Avahi daemon and utilities
+  ansible.builtin.apt:
+    name: 
+      - avahi-daemon
+      - libnss-mdns
+      - avahi-utils
+    state: present
+    update_cache: yes
+
+- name: Set system hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Update /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    line: '127.0.1.1 {{ inventory_hostname }}'
+    backup: yes
+
+- name: Enable and start Avahi daemon
+  ansible.builtin.systemd:
+    name: avahi-daemon
+    state: started
+    enabled: yes
+
+- name: Configure NSSwitch for mDNS resolution
+  ansible.builtin.lineinfile:
+    path: /etc/nsswitch.conf
+    regexp: '^hosts:'
+    line: 'hosts:          files mdns4_minimal [NOTFOUND=return] dns mdns4'
+    backup: yes
+
+- name: Check UFW status
+  ansible.builtin.command: ufw status
+  register: ufw_status
+  changed_when: false
+  failed_when: ufw_status.rc != 0 and ufw_status.rc != 2
+  check_mode: no
+
+- name: Allow mDNS in UFW
+  community.general.ufw:
+    rule: allow
+    port: '5353'
+    proto: udp
+  when: "'Status: active' in ufw_status.stdout" 

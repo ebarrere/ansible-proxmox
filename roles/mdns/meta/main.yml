@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  author: Elliott Barrere
+  description: Configure mDNS (Avahi) on Debian systems
+  license: MIT
+  min_ansible_version: 2.9
+  platforms:
+    - name: Debian
+      versions:
+        - bookworm
+  galaxy_tags:
+    - networking
+    - mdns
+    - avahi
+
+dependencies: [] 

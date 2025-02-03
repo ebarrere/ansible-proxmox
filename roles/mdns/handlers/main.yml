@@ -1,0 +1,10 @@
+---
+- name: restart avahi
+  ansible.builtin.systemd:
+    name: avahi-daemon
+    state: restarted
+
+- name: restart nscd
+  ansible.builtin.systemd:
+    name: nscd
+    state: restarted 

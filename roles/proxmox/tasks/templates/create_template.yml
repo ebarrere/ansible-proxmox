@@ -5,15 +5,18 @@
   when: template.key in existing_vms | json_query('[].vmid') and existing_vms | json_query(query) != [1]
   vars:
     query: "[?vmid == `{{ template.key }}`].template"
-
 - name: Create template if not exists
   when: >-
-    template.key not in existing_vms | json_query('[].vmid')
+    template.key not in existing_vms | json_query('[].vmid') and
+    (proxmox_create_cluster and inventory_hostname == groups['proxmox'] | sort | first) or
+    not proxmox_create_cluster
   block:
     - name: Create a new VM
       ansible.builtin.command: >
         pvesh create /nodes/{{ ansible_facts.hostname }}/qemu --vmid {{ template.key }}
       changed_when: true
+      run_once: true
+      delegate_to: "{{ groups['proxmox'] | sort | first }}"
 
     - name: Get cloudimg {{ template.value.cloud_image_url }}
       ansible.builtin.get_url:
@@ -21,16 +24,22 @@
         dest: /tmp
         mode: 0755
       register: downloaded_image
+      run_once: true
+      delegate_to: "{{ groups['proxmox'] | sort | first }}"
 
     - name: Import the downloaded disk
       ansible.builtin.command: qm importdisk {{ template.key }} {{ downloaded_image.dest }} {{ template.value.storage }}
       changed_when: true
+      run_once: true
+      delegate_to: "{{ groups['proxmox'] | sort | first }}"
 
     - name: Get VM configuration
       ansible.builtin.command: >
         pvesh get /nodes/{{ ansible_facts.hostname }}/qemu/{{ template.key }}/config --output-format json
       register: current_template_config
       changed_when: false
+      run_once: true
+      delegate_to: "{{ groups['proxmox'] | sort | first }}"
 
     - name: Update VM configuration
       vars:
@@ -64,7 +73,11 @@
         {% endif %}
         {{ network_devices_cfg }}
       changed_when: true
+      run_once: true
+      delegate_to: "{{ groups['proxmox'] | sort | first }}"
 
     - name: Convert VM into a template
       ansible.builtin.command: pvesh create /nodes/{{ ansible_facts.hostname }}/qemu/{{ template.key }}/template
       changed_when: true
+      run_once: true
+      delegate_to: "{{ groups['proxmox'] | sort | first }}"

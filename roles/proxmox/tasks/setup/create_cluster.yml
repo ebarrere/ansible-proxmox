@@ -1,0 +1,50 @@
+---
+- name: Install python3-pexpect package
+  ansible.builtin.apt:
+    name: python3-pexpect
+    state: present
+
+- name: Create cluster on first node
+  when: inventory_hostname == groups['proxmox'] | sort | first
+  block:
+    - name: Check if cluster exists
+      ansible.builtin.command: pvecm status
+      register: cluster_status
+      changed_when: false
+      failed_when: false
+
+    - name: Create Proxmox cluster
+      ansible.builtin.command: pvecm create {{ proxmox_cluster_name | d("domain | regex_replace('\..*$')") }}
+      when: cluster_status.rc != 0
+
+- name: Join other hosts to cluster
+  when: inventory_hostname != groups['proxmox'] | sort | first
+  block:
+    - name: Check if host is in cluster
+      ansible.builtin.command: pvecm status
+      register: cluster_status
+      changed_when: false
+      failed_when: false
+
+    - name: Get root password from Bitwarden
+      ansible.builtin.command: bw get password "proxmox_root"
+      register: root_password
+      delegate_to: localhost
+      changed_when: false
+      no_log: true
+      when: cluster_status.rc != 0
+      failed_when: 
+        - cluster_status.rc != 0 
+        - (root_password.stdout is not defined or root_password.stdout | length == 0)
+
+    - name: Join host to cluster
+      ansible.builtin.expect:
+        command: pvecm add {{ hostvars[groups['proxmox'] | sort | first]['ansible_host'] }} --force
+        responses:
+          "Please enter superuser \\(root\\) password for.*:": "{{ root_password.stdout }}"
+          "Are you sure you want to continue connecting (yes/no)?": "yes"
+        timeout: 30
+      when: 
+        - cluster_status.rc != 0
+        - root_password.stdout is defined
+        - root_password.stdout | length > 0

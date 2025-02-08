@@ -24,7 +24,7 @@
 
     set_memory: >-
       {{ ' --memory ' + vm.value.memory | default(vm_defaults_memory) | string
-      if vm.value.memory | default(vm_defaults_memory) != vm_config.memory | default(512) else '' }}
+      if vm.value.memory | default(vm_defaults_memory) | int != vm_config.memory | default(512) | int else '' }}
 
     set_agent: >-
       {{ ' --agent ' + vm.value.agent | default(vm_defaults_agent) | ternary(1, 0) | string

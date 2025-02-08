@@ -22,6 +22,7 @@ vm_defaults_cores: 1
 vm_defaults_cpu: host
 vm_defaults_memory: 512
 vm_defaults_onboot: false
+vm_defaults_bootorder: false
 vm_defaults_machine: q35
 vm_defaults_ostype: l26
 vm_defaults_scsihw: virtio-scsi-pci

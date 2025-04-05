@@ -30,6 +30,10 @@
   ansible.builtin.import_tasks: create_cluster.yml
   when: proxmox_create_cluster
 
+- name: Mount storage
+  ansible.builtin.import_tasks: add_storage.yml
+  when: storage_classes is defined and storage_classes is mapping
+
 - name: Install NGINX
   ansible.builtin.import_tasks: install_nginx.yml
   when: install_nginx_proxy

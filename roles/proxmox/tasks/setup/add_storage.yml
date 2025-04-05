@@ -1,0 +1,50 @@
+- name: Configure Proxmox to use ZFS pools
+  when: storage_classes.zfs is defined and storage_classes.zfs is mapping
+  delegate_to: "{{ groups['proxmox'] | sort | first }}"
+  run_once: true
+  block:
+    - name: Check storage configuration
+      ansible.builtin.command: pvesm status
+      changed_when: false
+      register: storage_vols
+
+    - name: Get current storage content types
+      ansible.builtin.command: pvesh get /nodes/{{ ansible_facts.hostname }}/storage/{{ item.value.name }}/content --output-format json
+      changed_when: false
+      register: current_content_types
+      when: item.value.name in storage_vols.stdout
+      with_items: "{{ storage_classes.zfs | dict2items }}"
+
+    - name: Add storage devices # noqa: no-changed-when[command]
+      ansible.builtin.command: >
+        pvesm add dir {{ item.value.name }} \
+        --path /{{ item.value.name }}/ \
+        --content {{ item.value.content }}
+      # args:
+      #   creates: /etc/pve/storage.cfg
+      with_items: "{{ storage_classes.zfs | dict2items }}"
+      when: item.value.name not in storage_vols.stdout
+
+    - name: debug
+      ansible.builtin.debug:
+        msg: |
+          {{ current_types }}
+          {{ desired_types }}
+          {{ item.value.name in storage_vols.stdout }}
+          {{ current_types | sort != desired_types | sort }}
+      vars:
+        current_types: "{{ (current_content_types.results | selectattr('item.value.name', 'equalto', item.value.name) | first).stdout | from_json | map(attribute='content') | list }}"
+        desired_types: "{{ item.value.content.split(',') }}"
+      with_items: "{{ storage_classes.zfs | dict2items }}"
+
+    - name: Update storage content types
+      ansible.builtin.command: >
+        pvesm set {{ item.value.name }} \
+        --content {{ item.value.content }}
+      vars:
+        current_types: "{{ (current_content_types.results | selectattr('item.value.name', 'equalto', item.value.name) | first).stdout | from_json | map(attribute='content') | list }}"
+        desired_types: "{{ item.value.content.split(',') }}"
+      when: >
+        item.value.name in storage_vols.stdout and
+        current_types | sort != desired_types | sort
+      with_items: "{{ storage_classes.zfs | dict2items }}"

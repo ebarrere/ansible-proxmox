@@ -26,25 +26,22 @@
       changed_when: false
       failed_when: false
 
-    - name: Get root password from Bitwarden
-      ansible.builtin.command: bw get password "proxmox_root"
-      register: root_password
+    - name: Get root password from Bitwarden # noqa: run-once[task]
+      ansible.builtin.set_fact:
+        root_password: "{{ lookup('community.general.bitwarden', 'proxmox_root', field='password')[0] }}"
       delegate_to: localhost
-      changed_when: false
       no_log: true
+      run_once: true
       when: cluster_status.rc != 0
-      failed_when: 
-        - cluster_status.rc != 0 
-        - (root_password.stdout is not defined or root_password.stdout | length == 0)
 
     - name: Join host to cluster
       ansible.builtin.expect:
         command: pvecm add {{ hostvars[groups['proxmox'] | sort | first]['ansible_host'] }} --force
         responses:
-          "Please enter superuser \\(root\\) password for.*:": "{{ root_password.stdout }}"
+          "Please enter superuser \\(root\\) password for.*:": "{{ root_password }}"
           "Are you sure you want to continue connecting (yes/no)?": "yes"
         timeout: 30
-      when: 
+      when:
         - cluster_status.rc != 0
-        - root_password.stdout is defined
-        - root_password.stdout | length > 0
+        - root_password is defined
+        - root_password | length > 0

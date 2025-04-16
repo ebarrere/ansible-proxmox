@@ -26,6 +26,7 @@
     --onboot {{ vm.value.onboot | default(vm_defaults_onboot) | ternary(1, 0) }}
     --ostype {{ vm.value.ostype | default(vm_defaults_ostype) }}
     --scsihw {{ vm.value.scsihw | default(vm_defaults_scsihw) }}
+    --ide0 {{ vm.value.storage }}:cloudinit
     --sockets {{ vm.value.sockets | default(vm_defaults_sockets) }}
     --vga {{ vm.value.vga | default(vm_defaults_vga) }}
     --tags {{ managed_by_ansible_tag }},{{ vm.value.tags | default([]) | join(',') }}

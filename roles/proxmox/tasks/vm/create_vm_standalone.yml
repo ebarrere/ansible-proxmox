@@ -37,3 +37,6 @@
     --tpmstate0 {{ vm.value.storage }}:1,version=v2.0
     {% endif %}
   changed_when: true
+
+- name: Configure standalone VM-{{ vm.key }}
+  ansible.builtin.import_tasks: update_vm.yml

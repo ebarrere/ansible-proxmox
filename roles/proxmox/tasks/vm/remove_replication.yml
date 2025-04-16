@@ -1,0 +1,18 @@
+---
+- name: Get replication configuration
+  ansible.builtin.command: >-
+    pvesh get /nodes/{{ ansible_facts.hostname }}/replication/ --output-format json
+  changed_when: false
+  failed_when: replication_config.rc not in [0, 255]
+  register: replication_config
+
+- name: Remove replication VM-{{ vmid }}
+  ansible.builtin.command: >-
+    pvesr delete {{ replication_target }}
+  changed_when: true
+  when: replication_config.rc == 0
+  vars:
+    regex_pattern: "^{{ vmid }}-[0-9]"
+  with_items: "{{ replication_config.stdout | from_json | selectattr('id', 'match', regex_pattern) | map(attribute='id') | list }}"
+  loop_control:
+    loop_var: replication_target

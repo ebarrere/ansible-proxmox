@@ -1,0 +1,17 @@
+---
+- name: Get replication configuration VM-{{ vm.key }}
+  ansible.builtin.command: >-
+    pvesh get /nodes/{{ ansible_facts.hostname }}/replication/{{ vm.key }}-0/status --output-format json
+  changed_when: false
+  failed_when: replication_config.rc not in [0, 255]
+  register: replication_config
+
+- name: Configure replication VM-{{ vm.key }}
+  ansible.builtin.command: >-
+    pvesr create-local-job {{ vm.key }}-0 {{ replication_target.host }} --schedule "{{ replication_target.schedule | default('daily') }}" \
+    --rate {{ replication_target.rate | default('10') }}
+  changed_when: true
+  when: replication_config.rc == 255
+  with_items: "{{ vm.value.replication_targets }}"
+  loop_control:
+    loop_var: replication_target

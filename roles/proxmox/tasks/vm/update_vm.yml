@@ -15,6 +15,9 @@
       ansible.builtin.import_tasks: update_network_devices.yml
     - name: Update VM disks
       ansible.builtin.import_tasks: update_disks.yml
+    - name: Configure VM replication
+      ansible.builtin.import_tasks: configure_replication.yml
+      when: vm.value.replication is defined
     - name: Update VM cd drives
       ansible.builtin.import_tasks: update_cd_drives.yml
     - name: Reboot VM if updated

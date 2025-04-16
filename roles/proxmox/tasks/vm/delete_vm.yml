@@ -20,3 +20,7 @@
       ansible.builtin.command: >-
         pvesh delete /nodes/{{ ansible_facts.hostname }}/qemu/{{ vmid }}
       changed_when: true
+      register: delete_response
+      until: delete_response.rc == 0
+      retries: 10
+      delay: 10

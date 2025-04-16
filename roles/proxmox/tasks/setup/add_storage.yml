@@ -3,48 +3,51 @@
   delegate_to: "{{ groups['proxmox'] | sort | first }}"
   run_once: true
   block:
-    - name: Check storage configuration
-      ansible.builtin.command: pvesm status
-      changed_when: false
-      register: storage_vols
+    - name: Get root password from Bitwarden # noqa: run-once[task]
+      ansible.builtin.set_fact:
+        root_password: "{{ lookup('community.general.bitwarden', 'proxmox_root', field='password')[0] }}"
+      # no_log: true
+      run_once: true
 
-    - name: Get current storage content types
-      ansible.builtin.command: pvesh get /nodes/{{ ansible_facts.hostname }}/storage/{{ item.value.name }}/content --output-format json
-      changed_when: false
-      register: current_content_types
-      when: item.value.name in storage_vols.stdout
-      with_items: "{{ storage_classes.zfs | dict2items }}"
+    - name: Get existing Proxmox storage
+      community.general.proxmox_storage_info:
+        api_host: "{{ ansible_host }}"
+        api_user: root@pam
+        api_password: "{{ root_password }}"
+        api_token_id: "{{ token_id | default(omit) }}"
+        api_token_secret: "{{ ansible_token_secret | default(omit) }}"
+      register: proxmox_storages
+      delegate_to: "localhost"
 
-    - name: Add storage devices # noqa: no-changed-when[command]
+    - name: Add storage devices
       ansible.builtin.command: >
         pvesm add dir {{ item.value.name }} \
         --path /{{ item.value.name }}/ \
-        --content {{ item.value.content }}
-      # args:
-      #   creates: /etc/pve/storage.cfg
+        --content {{ item.value.content }} --shared=1
       with_items: "{{ storage_classes.zfs | dict2items }}"
-      when: item.value.name not in storage_vols.stdout
-
-    - name: debug
-      ansible.builtin.debug:
-        msg: |
-          {{ current_types }}
-          {{ desired_types }}
-          {{ item.value.name in storage_vols.stdout }}
-          {{ current_types | sort != desired_types | sort }}
-      vars:
-        current_types: "{{ (current_content_types.results | selectattr('item.value.name', 'equalto', item.value.name) | first).stdout | from_json | map(attribute='content') | list }}"
-        desired_types: "{{ item.value.content.split(',') }}"
-      with_items: "{{ storage_classes.zfs | dict2items }}"
+      when: item.value.name not in proxmox_storages.proxmox_storages | map(attribute='storage')
+      changed_when: true
 
     - name: Update storage content types
       ansible.builtin.command: >
         pvesm set {{ item.value.name }} \
-        --content {{ item.value.content }}
+        --content {{ item.value.content }} --shared=1
       vars:
-        current_types: "{{ (current_content_types.results | selectattr('item.value.name', 'equalto', item.value.name) | first).stdout | from_json | map(attribute='content') | list }}"
-        desired_types: "{{ item.value.content.split(',') }}"
+        current_supported_types: "{{ proxmox_storages.proxmox_storages | selectattr('storage', 'equalto', item.value.name) | \
+          map(attribute='content') | flatten | sort }}"
+        current_shared: "{{ proxmox_storages.proxmox_storages | selectattr('storage', 'equalto', item.value.name) | \
+          map(attribute='shared') | first | default(0) }}"
+        desired_types: "{{ item.value.content.split(',') | sort }}"
       when: >
-        item.value.name in storage_vols.stdout and
-        current_types | sort != desired_types | sort
+        item.value.name in proxmox_storages.proxmox_storages | map(attribute='storage') and
+        (current_supported_types != desired_types or current_shared != 1)
       with_items: "{{ storage_classes.zfs | dict2items }}"
+      changed_when: true
+
+    - name: Add ZFS storage device
+      ansible.builtin.command: >
+        pvesm add zfspool {{ item.value.name }}-zfs \
+        --pool {{ item.value.name }}
+      with_items: "{{ storage_classes.zfs | dict2items }}"
+      when: item.value.name + '-zfs' not in proxmox_storages.proxmox_storages | map(attribute='storage')
+      changed_when: true

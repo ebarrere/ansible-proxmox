@@ -14,4 +14,6 @@
     pvesh create /nodes/{{ ansible_facts.hostname }}/qemu/{{ vm.key }}/status/reboot
     --timeout {{ vm_restart_timeout }}
   when: changes_pending
+  register: reboot_response
+  failed_when: reboot_response.rc not in [0, 2] and "not running" not in reboot_response.stderr
   changed_when: true

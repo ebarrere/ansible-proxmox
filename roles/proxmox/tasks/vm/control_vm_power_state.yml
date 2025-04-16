@@ -1,0 +1,17 @@
+---
+- name: Get power state VM-{{ vm.key }}
+  ansible.builtin.command: >-
+    pvesh get /nodes/{{ ansible_facts.hostname }}/qemu/{{ vm.key }}/status/current --output json
+  register: power_state
+  changed_when: false
+
+- name: Set power state VM-{{ vm.key }}
+  ansible.builtin.command: >-
+    pvesh create /nodes/{{ ansible_facts.hostname }}/qemu/{{ vm.key }}/status/{{ 'start' if desired_power_state == 'running' else 'stop' }}
+  register: power_state_response
+  vars:
+    current_power_state: "{{ (power_state.stdout | from_json).status }}"
+    desired_power_state: "{{ vm.value.power_state | default('running') }}"
+  when: current_power_state != desired_power_state
+  # failed_when: power_state_response.rc not in [0, 2] and "not running" not in power_state_response.stderr
+  changed_when: true

@@ -22,5 +22,7 @@
       ansible.builtin.import_tasks: update_cd_drives.yml
     - name: Reboot VM if updated
       ansible.builtin.import_tasks: reboot_updated_vm.yml
+    - name: Control VM power state
+      ansible.builtin.import_tasks: control_vm_power_state.yml
     - name: Update VM snapshots
       ansible.builtin.import_tasks: update_snapshots.yml

@@ -1,0 +1,34 @@
+- name: Install Ceph on primary node
+  command: pveceph install
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  become: true
+
+- name: Initialize Ceph cluster on primary node
+  command: pveceph init --network 10.10.10.0/24
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  become: true
+
+- name: Create Ceph monitor on all nodes
+  command: pveceph mon create
+  become: true
+
+- name: Create Ceph manager on all nodes
+  command: pveceph mgr create
+  become: true
+
+- name: Create Ceph OSD on primary node
+  command: >
+    pveceph osd create {{ disk.device }}p{{ disk.partitions.ceph.partition_number }}
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  become: true
+
+- name: Create Ceph pool on primary node
+  command: >
+    pveceph pool create {{ ceph_pool_name }} --add_storages
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  become: true
+

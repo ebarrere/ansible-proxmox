@@ -20,14 +20,28 @@
   loop_control:
     loop_var: netdev
 
+- name: Debug | cloud-init ipconfigs VM-{{ vm.key }}
+  vars:
+    existing_ip_config: "{{ vm_config['ipconfig' + ipcfg.key | string] | default('') }}"
+    updated_ip_config: "{{ 'ip=dhcp' if ipcfg.value.dhcp | default(false) else 'ip=' + ipcfg.value.ip + \
+      (',gw=' + ipcfg.value.gateway if ipcfg.value.gateway is defined else '') }}"
+  ansible.builtin.debug:
+    msg: |
+      {{ updated_ip_config }}
+      {{ existing_ip_config }}
+  with_items: "{{ vm.value.ipconfig | default({}) | dict2items }}"
+  when: ansible_verbosity > 0
+  loop_control:
+    loop_var: ipcfg
+
 - name: Update cloud-init ipconfigs VM-{{ vm.key }}
   vars:
     existing_ip_config: "{{ vm_config['ipconfig' + ipcfg.key | string] | default('') }}"
     updated_ip_config: "{{ 'ip=dhcp' if ipcfg.value.dhcp | default(false) else 'ip=' + ipcfg.value.ip + \
-      ',gw=' + ipcfg.value.gateway if ipcfg.value.gateway is defined else '' }}"
+      (',gw=' + ipcfg.value.gateway if ipcfg.value.gateway is defined else '') }}"
   ansible.builtin.command: >-
     pvesh set /nodes/{{ ansible_facts.hostname }}/qemu/{{ vm.key }}/config
-    --ipconfig{{ ipcfg.key }} {{ updated_ip_config }}
+    --ipconfig{{ ipcfg.key }} "{{ updated_ip_config }}"
   when: updated_ip_config != existing_ip_config
   changed_when: true
   with_items: "{{ vm.value.ipconfig | default({}) | dict2items }}"

@@ -1,0 +1,75 @@
+- name: Check if Ceph is already installed
+  command: pveceph status
+  register: ceph_status
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  become: true
+  changed_when: false
+  failed_when: false
+
+- name: Setup Ceph
+  when: ceph_status.stdout.strip() == 'Ceph is not installed'
+  become: true
+  block:
+    - name: Install Ceph on primary node
+      command: pveceph install
+      run_once: true
+      delegate_to: "{{ groups['proxmox'][0] }}"
+
+    - name: Initialize Ceph cluster on primary node
+      command: pveceph init --network 10.10.10.0/24
+      run_once: true
+      delegate_to: "{{ groups['proxmox'][0] }}"
+
+    - name: Create Ceph monitor on all nodes
+      command: pveceph mon create
+
+    - name: Create Ceph manager on all nodes
+      command: pveceph mgr create
+
+    - name: Create Ceph OSD on primary node
+      command: >
+        pveceph osd create {{ disk.device }}p{{ disk.partitions.ceph.partition_number }}
+      run_once: true
+      delegate_to: "{{ groups['proxmox'][0] }}"
+
+    - name: Create Ceph pool on primary node
+      command: >
+        pveceph pool create {{ ceph_pool_name }} --add_storages
+      run_once: true
+      delegate_to: "{{ groups['proxmox'][0] }}"
+
+- name: Get Ceph credentials
+  become: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  run_once: true
+  block:
+    - name: Get Ceph FSID
+      command: ceph fsid
+      register: ceph_fsid_result
+
+    - name: Create/get Ceph user for Kubernetes
+      command: >
+        ceph auth get-or-create client.{{ ceph_user_name }} -f json
+        mon 'profile rbd'
+        osd 'profile rbd pool={{ ceph_pool_name }}'
+        mgr 'profile rbd pool={{ ceph_pool_name }}'
+      register: ceph_user_result
+
+    - name: Format Ceph data
+      set_fact:
+        ceph_data:
+          ceph_pool_name: "{{ ceph_pool_name }}"
+          ceph_user_name: "{{ ceph_user_name }}"
+          ceph_fsid: "{{ ceph_fsid_result.stdout.strip() }}"
+          ceph_k8s_key: "{{ (ceph_user_result.stdout | from_json)[0].key }}"
+          ceph_monitors: "{{ groups['proxmox'] | map('extract', hostvars, 'ansible_default_ipv4') | map(attribute='address') | map('regex_replace', '^(.*)$', '\\1:6789') | list }}"
+
+- name: Write Ceph data to a local file
+  become: false
+  copy:
+    content: "{{ ceph_data | to_json }}"
+    dest: "{{ ceph_data_output_path }}"
+  delegate_to: "localhost"
+  when: ceph_data_output_path is defined
+  run_once: true

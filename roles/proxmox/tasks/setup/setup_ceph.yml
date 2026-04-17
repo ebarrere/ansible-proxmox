@@ -1,43 +1,99 @@
-- name: Check if Ceph is already installed
-  command: pveceph status
-  register: ceph_status
-  run_once: true
-  delegate_to: "{{ groups['proxmox'][0] }}"
-  become: true
+
+- name: Get Ceph network
+  ansible.builtin.set_fact:
+    ceph_ips: "{{ groups['proxmox'] | map('extract', hostvars, 'host_networks') | flatten() | selectattr('tags', 'defined') | selectattr('tags', 'equalto', 'ceph_network') | map(attribute='address') | list }}"
+    ceph_network: "{{ host_networks | selectattr('tags', 'defined') | selectattr('tags', 'equalto', 'ceph_network') | map(attribute='address') | map('regex_replace', '[0-9]+$', '0/24') | first }}"
+
+- name: Check if Ceph is installed
+  command: ceph --version
+  register: ceph_installed
   changed_when: false
   failed_when: false
 
-- name: Setup Ceph
-  when: ceph_status.stdout.strip() == 'Ceph is not installed'
-  become: true
-  block:
-    - name: Install Ceph on primary node
-      command: pveceph install
-      run_once: true
-      delegate_to: "{{ groups['proxmox'][0] }}"
+- name: Install Ceph
+  shell: yes | pveceph install --repository no-subscription
+  when: ceph_installed.rc != 0
 
-    - name: Initialize Ceph cluster on primary node
-      command: pveceph init --network 10.10.10.0/24
-      run_once: true
-      delegate_to: "{{ groups['proxmox'][0] }}"
+- name: Check if Ceph cluster is initialized
+  stat:
+    path: /etc/pve/ceph.conf
+  register: ceph_conf
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
 
-    - name: Create Ceph monitor on all nodes
-      command: pveceph mon create
+- name: Initialize Ceph cluster on primary node
+  command: pveceph init --network {{ ceph_network }}
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  when: not ceph_conf.stat.exists
 
-    - name: Create Ceph manager on all nodes
-      command: pveceph mgr create
+- name: Check if monitor exists on primary node
+  stat:
+    path: /var/lib/ceph/mon/ceph-{{ groups['proxmox'][0] }}
+  register: mon_primary
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
 
-    - name: Create Ceph OSD on primary node
-      command: >
-        pveceph osd create {{ disk.device }}p{{ disk.partitions.ceph.partition_number }}
-      run_once: true
-      delegate_to: "{{ groups['proxmox'][0] }}"
+- name: Create first Ceph monitor
+  command: pveceph mon create
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  when: not mon_primary.stat.exists
 
-    - name: Create Ceph pool on primary node
-      command: >
-        pveceph pool create {{ ceph_pool_name }} --add_storages
-      run_once: true
-      delegate_to: "{{ groups['proxmox'][0] }}"
+- name: Wait for first monitor to be stable
+  pause:
+    seconds: 30
+  when: not mon_primary.stat.exists
+
+- name: Check if monitor exists on remaining nodes
+  stat:
+    path: /var/lib/ceph/mon/ceph-{{ inventory_hostname }}
+  register: mon_exists
+  when: inventory_hostname != groups['proxmox'][0]
+
+- name: Create Ceph monitors on remaining nodes
+  command: pveceph mon create
+  when:
+    - inventory_hostname != groups['proxmox'][0]
+    - not mon_exists.stat.exists
+
+- name: Check if manager exists on remaining nodes
+  stat:
+    path: /var/lib/ceph/mgr/ceph-{{ inventory_hostname }}
+  register: mgr_exists
+  when: inventory_hostname != groups['proxmox'][0]
+
+- name: Create Ceph manager on remaining nodes
+  command: pveceph mgr create
+  when:
+    - inventory_hostname != groups['proxmox'][0]
+    - not mgr_exists.stat.exists
+
+- name: Check if OSD exists on partition
+  command: ceph-volume lvm list {{ disk.device }}p{{ disk.partitions.ceph.partition_number }}
+  register: osd_exists
+  changed_when: false
+  failed_when: false
+
+- name: Create Ceph OSDs
+  command: >
+    pveceph osd create {{ disk.device }}p{{ disk.partitions.ceph.partition_number }}
+  when: osd_exists.rc != 0
+
+- name: Check if Ceph pool exists
+  shell: ceph osd pool ls | grep -q "^{{ ceph_pool_name }}$"
+  register: pool_exists
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  changed_when: false
+  failed_when: false
+
+- name: Create Ceph pool on primary node
+  command: >
+    pveceph pool create {{ ceph_pool_name }} --add_storages
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  when: pool_exists.rc != 0
 
 - name: Get Ceph credentials
   become: true
@@ -47,6 +103,7 @@
     - name: Get Ceph FSID
       command: ceph fsid
       register: ceph_fsid_result
+      changed_when: false
 
     - name: Create/get Ceph user for Kubernetes
       command: >
@@ -55,6 +112,7 @@
         osd 'profile rbd pool={{ ceph_pool_name }}'
         mgr 'profile rbd pool={{ ceph_pool_name }}'
       register: ceph_user_result
+      changed_when: false
 
     - name: Format Ceph data
       set_fact:
@@ -63,7 +121,8 @@
           ceph_user_name: "{{ ceph_user_name }}"
           ceph_fsid: "{{ ceph_fsid_result.stdout.strip() }}"
           ceph_k8s_key: "{{ (ceph_user_result.stdout | from_json)[0].key }}"
-          ceph_monitors: "{{ groups['proxmox'] | map('extract', hostvars, 'ansible_default_ipv4') | map(attribute='address') | map('regex_replace', '^(.*)$', '\\1:6789') | list }}"
+          # ceph_monitors: "{{ groups['proxmox'] | map('extract', hostvars, 'ansible_default_ipv4') | map(attribute='address') | map('regex_replace', '^(.*)$', '\\1:6789') | list }}"
+          ceph_monitors: "{{ ceph_ips | map('regex_replace', '^(.*)$', '\\1:6789') | list }}"
 
 - name: Write Ceph data to a local file
   become: false

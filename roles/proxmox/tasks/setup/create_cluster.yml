@@ -26,12 +26,16 @@
       changed_when: false
       failed_when: false
 
+    - name: Debug | Cluster status
+      ansible.builtin.debug:
+        msg: "{{ cluster_status }}"
+
     - name: Get root password from Bitwarden # noqa: run-once[task]
       ansible.builtin.set_fact:
         root_password: "{{ lookup('community.general.bitwarden', 'proxmox_root', field='password')[0] }}"
       delegate_to: localhost
       no_log: true
-      run_once: true
+      # run_once: true
       when: cluster_status.rc != 0
 
     - name: Join host to cluster

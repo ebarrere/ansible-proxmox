@@ -2,17 +2,21 @@
 - name: Add proxmox apt repo
   ansible.builtin.import_tasks: switch_to_community_updates_repo.yml
   when: install_proxmox | d(false)
+  tags: bootstrap
 
 - name: Ensure Proxmox is installed
   ansible.builtin.import_tasks: install.yml
   when: install_proxmox | d(false)
+  tags: bootstrap
 
 - name: Switch to community APT repo
   ansible.builtin.import_tasks: switch_to_community_updates_repo.yml
   when: switch_to_community_updates_repo
+  tags: bootstrap
 
 - name: Update Proxmox
   ansible.builtin.import_tasks: update.yml
+  tags: bootstrap
 
 - name: Disable Proxmox Subscription prompt
   ansible.builtin.import_tasks: disable_subscription_prompt.yml
@@ -29,6 +33,7 @@
 - name: Create cluster
   ansible.builtin.import_tasks: create_cluster.yml
   when: proxmox_create_cluster
+  tags: cluster
 
 - name: Mount storage
   ansible.builtin.import_tasks: add_storage.yml

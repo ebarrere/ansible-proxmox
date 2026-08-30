@@ -132,3 +132,92 @@
   delegate_to: "localhost"
   when: ceph_data_output_path is defined
   run_once: true
+
+- name: Check if MDS exists on this node
+  stat:
+    path: /var/lib/ceph/mds/ceph-{{ inventory_hostname }}
+  register: mds_exists
+
+- name: Create Ceph MDS
+  command: pveceph mds create
+  when: not mds_exists.stat.exists
+
+- name: Check if CephFS filesystem exists
+  command: ceph fs ls --format json
+  register: cephfs_list
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  changed_when: false
+
+- name: Create CephFS filesystem
+  command: pveceph fs create --name {{ cephfs_name }} --pg_num {{ cephfs_pg_num | default(16) }}
+  register: cephfs_create_result
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  when: cephfs_list.stdout | from_json | selectattr('name', 'equalto', cephfs_name) | list | length == 0
+  failed_when: >
+    cephfs_create_result.rc != 0 or
+    'mon_cmd failed' in (cephfs_create_result.stdout | default('')) or
+    'mon_cmd failed' in (cephfs_create_result.stderr | default(''))
+
+- name: Wait for CephFS MDS to become active
+  shell: ceph fs status {{ cephfs_name }} | grep -q 'active'
+  register: mds_active_check
+  until: mds_active_check.rc == 0
+  retries: 12
+  delay: 10
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  changed_when: false
+  failed_when: false
+  when: cephfs_list.stdout | from_json | selectattr('name', 'equalto', cephfs_name) | list | length == 0
+
+- name: Check if CephFS subvolume group exists
+  command: ceph fs subvolumegroup ls {{ cephfs_name }} --format json
+  register: cephfs_subvolumegroups
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  changed_when: false
+  when: cephfs_subvolumegroup_name is defined
+
+- name: Create CephFS subvolume group for Kubernetes
+  command: ceph fs subvolumegroup create {{ cephfs_name }} {{ cephfs_subvolumegroup_name }}
+  run_once: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  when:
+    - cephfs_subvolumegroup_name is defined
+    - cephfs_subvolumegroups.stdout | from_json | selectattr('name', 'equalto', cephfs_subvolumegroup_name) | list | length == 0
+
+- name: Get CephFS credentials for Kubernetes
+  become: true
+  delegate_to: "{{ groups['proxmox'][0] }}"
+  run_once: true
+  block:
+    - name: Create/get CephFS user for Kubernetes
+      command: >
+        ceph auth get-or-create client.{{ cephfs_user_name }} -f json
+        mon 'allow r'
+        mds 'allow rw'
+        osd 'allow rw tag cephfs *={{ cephfs_name }}'
+        mgr 'allow rw'
+      register: cephfs_user_result
+      changed_when: false
+
+    - name: Format CephFS data
+      set_fact:
+        cephfs_data:
+          ceph_fs_name: "{{ cephfs_name }}"
+          ceph_user_name: "{{ cephfs_user_name }}"
+          ceph_subvolumegroup_name: "{{ cephfs_subvolumegroup_name | default('') }}"
+          ceph_fsid: "{{ ceph_data.ceph_fsid }}"
+          ceph_k8s_key: "{{ (cephfs_user_result.stdout | from_json)[0].key }}"
+          ceph_monitors: "{{ ceph_data.ceph_monitors }}"
+
+- name: Write CephFS data to a local file
+  become: false
+  copy:
+    content: "{{ cephfs_data | to_json }}"
+    dest: "{{ cephfs_data_output_path }}"
+  delegate_to: "localhost"
+  when: cephfs_data_output_path is defined
+  run_once: true

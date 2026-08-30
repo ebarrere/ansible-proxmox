@@ -1,0 +1,57 @@
+---
+# Firmware updates for the ThinkCentre M910q PVE hosts via fwupd / LVFS.
+#
+# IMPORTANT: the M910q system BIOS (M1AKT*) is NOT published to LVFS, so it
+# CANNOT be flashed from Linux. `fwupdmgr` only offers Secure Boot KEK / dbx
+# configuration updates on this hardware. To bump the actual BIOS version
+# (e.g. M1AKT59A -> M1AKT5AA) use the Lenovo DOS flasher booted in Legacy/CSM
+# mode -- see docs/firmware.md.
+#
+# Safe by default: this reports available updates only. To actually install:
+#   ./run.sh pve firmware   is NOT wired in; run explicitly:
+#   ansible-playbook playbooks/firmware_update.yml -i inventories/pve/hosts.yml -e firmware_apply=true
+- name: Firmware updates (fwupd / LVFS)
+  hosts: proxmox
+  serial: 1              # one host at a time; capsule updates reboot
+  become: true
+  gather_facts: false
+
+  vars:
+    firmware_apply: false   # override to true to install available updates
+
+  tasks:
+    - name: Ensure fwupd is installed
+      ansible.builtin.apt:
+        name: fwupd
+        state: present
+        update_cache: true
+
+    - name: Refresh LVFS metadata
+      ansible.builtin.command: fwupdmgr refresh --force
+      register: fwupd_refresh
+      changed_when: false
+      failed_when: false
+
+    - name: Query available firmware updates
+      ansible.builtin.command: fwupdmgr get-updates
+      register: fwupd_updates
+      changed_when: false
+      failed_when: false
+
+    - name: Show available firmware updates
+      ansible.builtin.debug:
+        msg: "{{ fwupd_updates.stdout_lines | default(['(none reported)']) }}"
+
+    - name: Install available firmware updates
+      ansible.builtin.command: fwupdmgr update --assume-yes --no-reboot-check
+      register: fwupd_apply
+      when: firmware_apply | bool
+      changed_when: "'no updates' not in (fwupd_apply.stdout | default('') | lower)"
+      failed_when:
+        - fwupd_apply.rc | default(0) != 0
+        - "'No updates available' not in (fwupd_apply.stdout | default(''))"
+      notify: Reboot
+
+  handlers:
+    - name: Reboot
+      ansible.builtin.reboot:

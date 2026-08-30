@@ -58,6 +58,7 @@ Serial console — **both** SIO UARTs, 115200 8N1, VT-UTF8, no flow control:
 | 0x102D / 0x102E | Parity = None | 0x01 |
 | 0x102F / 0x1030 | Stop Bits = 1 | 0x01 |
 | 0x1031 / 0x1032 | Flow Control = None | 0x00 |
+| 0x1037 / 0x1038 | VT-UTF8 Combo Key Support | 0x01 (lets terminals send F-keys over serial) |
 
 Homelab hardware settings:
 
@@ -77,3 +78,18 @@ these units the DB9 pigtail must go on the **COM2** header — that is the UART
 that maps to Serial Port1 (3F8), the enabled COM0 redirection. Both ends are
 DTE, so a **null modem** is required between the M910q DB9 and the USB-serial
 adapter. Terminal: `screen /dev/ttyUSB0 115200` (8N1, no flow).
+
+## Function keys over serial
+
+With VT-UTF8 Combo Key Support on (0x1037/0x1038), send BIOS hotkeys as `Esc`
+combos in your terminal (type Escape, then the char), during POST:
+
+| Key | Send | Key | Send |
+|-----|------|-----|------|
+| F1 (Setup) | `Esc` `1` | F10 | `Esc` `0` |
+| F2..F9 | `Esc` `2`..`9` | F11 | `Esc` `!` |
+| | | F12 (boot menu) | `Esc` `@` |
+
+To break a "no boot device" reboot loop: mash `Esc` `@` at the splash to reach
+the boot menu, or `Esc` `1` for Setup, then set a real boot path (PXE/network).
+

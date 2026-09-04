@@ -1,0 +1,26 @@
+---
+# Linux/GRUB serial console so boot + login are reachable over the serial port
+# (in addition to the BIOS/UEFI pre-boot redirection set by the m910q image).
+# See ../../../../01-bootstrap/m910q and 02-proxmox/docs/firmware.md.
+- name: Serial console - kernel cmdline (console on VGA and serial)
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX='
+    line: 'GRUB_CMDLINE_LINUX="console=tty1 console={{ serial_console_tty }},{{ serial_console_speed }}n8"'
+  notify: Update GRUB
+
+- name: Serial console - show the GRUB menu on serial too
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: "^{{ item.key }}="
+    line: '{{ item.key }}="{{ item.value }}"'
+  loop:
+    - {key: GRUB_TERMINAL, value: "console serial"}
+    - {key: GRUB_SERIAL_COMMAND, value: "serial --unit={{ serial_console_unit }} --speed={{ serial_console_speed }}"}
+  notify: Update GRUB
+
+- name: Serial console - enable login getty on {{ serial_console_tty }}
+  ansible.builtin.systemd:
+    name: "serial-getty@{{ serial_console_tty }}.service"
+    enabled: true
+    state: started

@@ -1,6 +1,14 @@
 ---
 update_packages: true
 
+# Serial console (boot + login over the serial port). On the M910q the physical
+# header is the 2F8 UART = Linux ttyS1 = GRUB unit 1 (ttyS0/3F8 is a phantom node
+# and errors on write). Matches the 115200 8N1 set by the m910q BIOS image.
+configure_serial_console: false
+serial_console_tty: ttyS1
+serial_console_speed: 115200
+serial_console_unit: 1
+
 switch_to_community_updates_repo: true
 disable_no_subscription_prompt: true
 install_pve_discord_dark_theme: true

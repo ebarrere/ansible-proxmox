@@ -22,6 +22,11 @@
   ansible.builtin.import_tasks: disable_subscription_prompt.yml
   when: disable_no_subscription_prompt
 
+- name: Configure serial console
+  ansible.builtin.import_tasks: serial_console.yml
+  when: configure_serial_console
+  tags: serial
+
 - name: Install Dark Theme
   ansible.builtin.import_tasks: install_pve_dark_theme.yml
   when: install_pve_discord_dark_theme

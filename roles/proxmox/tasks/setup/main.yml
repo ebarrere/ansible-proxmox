@@ -24,7 +24,7 @@
 
 - name: Configure serial console
   ansible.builtin.import_tasks: serial_console.yml
-  when: configure_serial_console
+  when: configure_serial_console | bool
   tags: serial
 
 - name: Install Dark Theme

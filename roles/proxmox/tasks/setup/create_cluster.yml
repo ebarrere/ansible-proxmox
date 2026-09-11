@@ -20,6 +20,11 @@
 - name: Join other hosts to cluster
   when: inventory_hostname != groups['proxmox'] | sort | first
   block:
+    # For a rebuilt former member, purge its stale corosync + ceph membership
+    # (quorum-gated) before rejoining. No-op for a brand-new node.
+    - name: Clean stale former-member state before (re)join
+      ansible.builtin.include_tasks: rejoin_cleanup.yml
+
     - name: Check if host is in cluster
       ansible.builtin.command: pvecm status
       register: cluster_status

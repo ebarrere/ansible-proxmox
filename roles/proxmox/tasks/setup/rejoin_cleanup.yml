@@ -1,0 +1,147 @@
+---
+# Clean a rebuilt former member's stale corosync + Ceph state before it rejoins.
+# Runs ONLY when this node is not currently in the corosync cluster, so it:
+#   - no-ops for a brand-new node (nothing stale exists), and
+#   - is skipped entirely for a healthy existing member (idempotent re-runs).
+# Every mutation runs on a healthy SURVIVING node and is QUORUM/min_size-GATED:
+# it FAILS the run rather than break corosync or Ceph quorum. Reads run under
+# --check so the gates are always evaluated; mutations are skipped under --check.
+
+- name: Rejoin | Is this node already in the corosync cluster?
+  ansible.builtin.command: pvecm status
+  register: local_pvecm
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Rejoin | Stale former-member cleanup
+  when: local_pvecm.rc != 0
+  vars:
+    survivor: "{{ groups['proxmox'] | difference([inventory_hostname]) | sort | first }}"
+    stale_ceph_ip: "{{ (hostvars[inventory_hostname].host_networks | selectattr('tags', 'defined') | selectattr('tags', 'equalto', 'ceph_network') | map(attribute='address') | list | first) | default('') }}"
+  block:
+    - name: Rejoin | Require a surviving cluster node
+      ansible.builtin.assert:
+        that: survivor is defined and (survivor | length > 0)
+        fail_msg: "No surviving Proxmox node to clean up against."
+
+    # ---------------- corosync ----------------
+    - name: Rejoin | List corosync nodes (via {{ survivor }})
+      delegate_to: "{{ survivor }}"
+      check_mode: false
+      changed_when: false
+      failed_when: false
+      register: corosync_nodes
+      ansible.builtin.command: pvecm nodes
+
+    - name: Rejoin | Quorum-gated corosync delnode of stale {{ inventory_hostname }}
+      delegate_to: "{{ survivor }}"
+      when: corosync_nodes.stdout is search('(^|\s)' ~ inventory_hostname ~ '(\s|$)')
+      register: cs_delnode
+      changed_when: "'DELNODE-DONE' in cs_delnode.stdout"
+      failed_when: cs_delnode.rc != 0
+      ansible.builtin.shell: |
+        set -euo pipefail
+        eval "$(pvecm status | awk -F: '/Expected votes/{gsub(/ /,"",$2);print "EXP="$2} /Total votes/{gsub(/ /,"",$2);print "TOT="$2}')"
+        NEWQ=$(( (EXP - 1) / 2 + 1 ))
+        echo "corosync: expected=$EXP online=$TOT post_removal_quorum=$NEWQ"
+        if [ "${TOT}" -lt "${NEWQ}" ]; then
+          echo "QUORUM GATE: delnode {{ inventory_hostname }} -> online ${TOT} < quorum ${NEWQ} -- REFUSING" >&2; exit 1
+        fi
+        {% if not ansible_check_mode %}
+        pvecm delnode {{ inventory_hostname }}
+        rm -rf /etc/pve/nodes/{{ inventory_hostname }}
+        echo DELNODE-DONE
+        {% else %}
+        echo "(check) would delnode {{ inventory_hostname }}"
+        {% endif %}
+      args: { executable: /bin/bash }
+
+    # ---------------- ceph (only if a ceph cluster is up on the survivor) ----------------
+    - name: Rejoin | Is Ceph reachable on {{ survivor }}?
+      delegate_to: "{{ survivor }}"
+      check_mode: false
+      changed_when: false
+      failed_when: false
+      register: ceph_up
+      ansible.builtin.command: ceph -s
+
+    - name: Rejoin | Ceph stale-state cleanup
+      when: ceph_up.rc == 0
+      delegate_to: "{{ survivor }}"
+      block:
+        - name: Rejoin | Quorum-gated Ceph mon remove {{ inventory_hostname }}
+          register: mon_rm
+          changed_when: "'MON-REMOVED' in mon_rm.stdout"
+          failed_when: mon_rm.rc != 0
+          ansible.builtin.shell: |
+            set -euo pipefail
+            if ! ceph mon dump 2>/dev/null | grep -qw "{{ inventory_hostname }}"; then
+              echo "no stale mon for {{ inventory_hostname }}"; exit 0
+            fi
+            HEALTHY=$(ceph quorum_status 2>/dev/null | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["quorum_names"]))')
+            TOTAL=$(ceph mon dump 2>/dev/null | grep -cE '^[0-9]+: ')
+            NEWQ=$(( (TOTAL - 1) / 2 + 1 ))
+            echo "ceph mon: total=${TOTAL} healthy=${HEALTHY} post_removal_quorum=${NEWQ}"
+            if [ "${HEALTHY}" -lt "${NEWQ}" ]; then
+              echo "QUORUM GATE: mon remove {{ inventory_hostname }} -> healthy ${HEALTHY} < quorum ${NEWQ} -- REFUSING" >&2; exit 1
+            fi
+            {% if not ansible_check_mode %}
+            ceph mon remove {{ inventory_hostname }}
+            echo MON-REMOVED
+            {% else %}
+            echo "(check) would ceph mon remove {{ inventory_hostname }}"
+            {% endif %}
+          args: { executable: /bin/bash }
+
+        - name: Rejoin | min_size-gated Ceph OSD purge for host {{ inventory_hostname }}
+          register: osd_purge
+          changed_when: "'OSD-PURGED' in osd_purge.stdout"
+          failed_when: osd_purge.rc != 0
+          ansible.builtin.shell: |
+            set -euo pipefail
+            IDS=$(ceph osd ls-tree {{ inventory_hostname }} 2>/dev/null | tr '\n' ' ' || true)
+            if [ -z "${IDS// }" ]; then echo "no stale osd for {{ inventory_hostname }}"; exit 0; fi
+            UP=$(ceph osd stat 2>/dev/null | grep -oE '[0-9]+ up' | grep -oE '^[0-9]+')
+            MINSIZE=$(ceph osd pool get {{ ceph_pool_name }} min_size 2>/dev/null | awk '{print $2}'); MINSIZE=${MINSIZE:-2}
+            echo "ceph osd: stale_ids=[${IDS}] up=${UP} min_size=${MINSIZE}"
+            if [ "${UP}" -lt "${MINSIZE}" ]; then
+              echo "MIN_SIZE GATE: up OSDs ${UP} < min_size ${MINSIZE} -- REFUSING to purge" >&2; exit 1
+            fi
+            {% if not ansible_check_mode %}
+            for id in ${IDS}; do ceph osd purge "${id}" --yes-i-really-mean-it; done
+            ceph osd crush remove {{ inventory_hostname }} 2>/dev/null || true
+            echo OSD-PURGED
+            {% else %}
+            echo "(check) would purge osd ids [${IDS}] + crush bucket {{ inventory_hostname }}"
+            {% endif %}
+          args: { executable: /bin/bash }
+
+        # ceph mon remove clears the monmap but not the pve-managed ceph.conf;
+        # a lingering [mon.<host>] (and its mon_host IP) makes the later
+        # `pveceph mon create` fail with "address already in use".
+        - name: Rejoin | Strip stale ceph.conf entries for {{ inventory_hostname }}
+          when: not ansible_check_mode
+          changed_when: "'CONF-CLEANED' in conf_clean.stdout"
+          register: conf_clean
+          ansible.builtin.shell: |
+            python3 - "{{ inventory_hostname }}" "{{ stale_ceph_ip }}" <<'PY'
+            import sys, re
+            host, ip = sys.argv[1], sys.argv[2]
+            p = "/etc/pve/ceph.conf"; s = open(p).read(); orig = s
+            if ip:
+                s = re.sub(r'(?m)^(\s*mon_host\s*=.*?)\s+' + re.escape(ip) + r'\b(.*)$', r'\1\2', s)
+            def drop(section, text):
+                out, skip = [], False
+                for ln in text.splitlines(keepends=True):
+                    if ln.strip() == "[" + section + "]": skip = True; continue
+                    if skip and (ln.startswith("[") or ln.strip() == ""): skip = False
+                    if not skip: out.append(ln)
+                return "".join(out)
+            s = drop("mon." + host, s); s = drop("mds." + host, s)
+            if s != orig:
+                open(p, "w").write(s); print("CONF-CLEANED")
+            else:
+                print("ceph.conf already clean")
+            PY
+          args: { executable: /bin/bash }

@@ -52,3 +52,8 @@ container_defaults:
   netdev_firewall: true
   nameserver: ""
   searchdomain: ""
+
+# Set true (e.g. -e force_replication_rebuild=true) to tear down a VM's
+# replication job + stale target volumes before reconfiguring, so it re-clones
+# fresh. Needed after a VM is rebuilt (new disks won't match old replicas).
+force_replication_rebuild: false

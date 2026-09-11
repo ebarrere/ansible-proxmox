@@ -1,4 +1,32 @@
 ---
+# When force_replication_rebuild=true, tear down the existing job and the stale
+# replicated volumes on the target first. After a VM is rebuilt its fresh disks
+# no longer match the previously-replicated target volumes, so replication fails
+# with "volume already exists". Removing them lets the job below re-clone fresh.
+- name: Force-rebuild replication VM-{{ vm.key }}
+  when: force_replication_rebuild | default(false) | bool
+  block:
+    - name: Delete existing replication job VM-{{ vm.key }}
+      ansible.builtin.command: "pvesr delete {{ vm.key }}-0 --force"
+      register: rep_del
+      changed_when: rep_del.rc == 0
+      failed_when: rep_del.rc not in [0, 255]   # 255 == job does not exist
+
+    - name: Remove stale replicated volumes for VM-{{ vm.key }} on {{ replication_target.host }}
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        pvesm list {{ replication_target.pool }} --vmid {{ vm.key }} 2>/dev/null
+        | awk 'NR>1 {print $1}'
+        | xargs -r -n1 pvesm free
+      args:
+        executable: /bin/bash
+      delegate_to: "{{ replication_target.host }}"
+      changed_when: true
+      failed_when: false
+      with_items: "{{ vm.value.replication_targets }}"
+      loop_control:
+        loop_var: replication_target
+
 - name: Get replication configuration VM-{{ vm.key }}
   ansible.builtin.command: >-
     pvesh get /nodes/{{ ansible_facts.hostname }}/replication/{{ vm.key }}-0/status --output-format json

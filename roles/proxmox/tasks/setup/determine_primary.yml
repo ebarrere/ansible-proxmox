@@ -1,0 +1,31 @@
+---
+# Pick a stable primary node for cluster/ceph operations: the first node that is
+# CURRENTLY a quorate cluster member, so delegated tasks never target a down or
+# rebuilt node (e.g. when pve1 -- the alphabetical first -- is the one being
+# replaced). On a genuine fresh build (no members yet) fall back to the
+# alphabetically-first node, which becomes the cluster creator.
+- name: Determine primary | Probe each node's cluster membership
+  run_once: true
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['proxmox'] | sort }}"
+  register: primary_probe
+  changed_when: false
+  failed_when: false
+  ignore_unreachable: true
+  check_mode: false
+  ansible.builtin.command: pvecm status
+
+- name: Determine primary | Collect quorate members
+  run_once: true
+  ansible.builtin.set_fact:
+    proxmox_members: "{{ primary_probe.results | selectattr('rc', 'defined') | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+
+- name: Determine primary | proxmox_primary = first quorate member (else first node)
+  run_once: true
+  ansible.builtin.set_fact:
+    proxmox_primary: "{{ proxmox_members[0] if (proxmox_members | length > 0) else (groups['proxmox'] | sort | first) }}"
+
+- name: Determine primary | Show the chosen primary
+  run_once: true
+  ansible.builtin.debug:
+    msg: "cluster primary = {{ proxmox_primary }} (quorate members: {{ proxmox_members | default([]) }})"

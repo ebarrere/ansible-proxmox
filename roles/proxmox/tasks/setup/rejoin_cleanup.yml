@@ -17,13 +17,15 @@
 - name: Rejoin | Stale former-member cleanup
   when: local_pvecm.rc != 0
   vars:
-    survivor: "{{ groups['proxmox'] | difference([inventory_hostname]) | sort | first }}"
+    survivor: "{{ proxmox_primary }}"
     stale_ceph_ip: "{{ (hostvars[inventory_hostname].host_networks | selectattr('tags', 'defined') | selectattr('tags', 'equalto', 'ceph_network') | map(attribute='address') | list | first) | default('') }}"
   block:
-    - name: Rejoin | Require a surviving cluster node
+    - name: Rejoin | Require a healthy surviving cluster node (not this one)
       ansible.builtin.assert:
-        that: survivor is defined and (survivor | length > 0)
-        fail_msg: "No surviving Proxmox node to clean up against."
+        that:
+          - survivor is defined and (survivor | length > 0)
+          - survivor != inventory_hostname
+        fail_msg: "No healthy surviving node to clean up against (primary resolved to the node being rejoined)."
 
     # ---------------- corosync ----------------
     - name: Rejoin | List corosync nodes (via {{ survivor }})

@@ -35,6 +35,10 @@
   ansible.builtin.import_tasks: acme/enable_acme.yml
   when: enable_acme
 
+- name: Determine cluster primary (a healthy member, not a down/rebuilt node)
+  ansible.builtin.import_tasks: determine_primary.yml
+  tags: [cluster, ceph]
+
 - name: Create cluster
   ansible.builtin.import_tasks: create_cluster.yml
   when: proxmox_create_cluster

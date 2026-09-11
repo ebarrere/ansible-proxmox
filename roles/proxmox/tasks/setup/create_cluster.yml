@@ -5,7 +5,7 @@
     state: present
 
 - name: Create cluster on first node
-  when: inventory_hostname == groups['proxmox'] | sort | first
+  when: inventory_hostname == proxmox_primary
   block:
     - name: Check if cluster exists
       ansible.builtin.command: pvecm status
@@ -18,7 +18,7 @@
       when: cluster_status.rc != 0
 
 - name: Join other hosts to cluster
-  when: inventory_hostname != groups['proxmox'] | sort | first
+  when: inventory_hostname != proxmox_primary
   block:
     # For a rebuilt former member, purge its stale corosync + ceph membership
     # (quorum-gated) before rejoining. No-op for a brand-new node.
@@ -45,7 +45,7 @@
 
     - name: Join host to cluster
       ansible.builtin.expect:
-        command: pvecm add {{ hostvars[groups['proxmox'] | sort | first]['ansible_host'] }} --force
+        command: pvecm add {{ hostvars[proxmox_primary]['ansible_host'] }} --force
         responses:
           "Please enter superuser \\(root\\) password for.*:": "{{ root_password }}"
           "Are you sure you want to continue connecting (yes/no)?": "yes"

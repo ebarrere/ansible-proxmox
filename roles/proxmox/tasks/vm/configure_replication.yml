@@ -1,31 +1,36 @@
 ---
-# When force_replication_rebuild=true, tear down the existing job and the stale
-# replicated volumes on the target first. After a VM is rebuilt its fresh disks
-# no longer match the previously-replicated target volumes, so replication fails
-# with "volume already exists". Removing them lets the job below re-clone fresh.
+# When force_replication_rebuild=true, nuke this VM's replication job(s) and
+# every off-node replica of its disks, so the job below re-clones fresh. Needed
+# after a VM is rebuilt: its new disks share no snapshot with the old replicas,
+# so sync fails with "no common base snapshot / volume already exists".
 - name: Force-rebuild replication VM-{{ vm.key }}
   when: force_replication_rebuild | default(false) | bool
   block:
-    - name: Delete existing replication job VM-{{ vm.key }}
-      ansible.builtin.command: "pvesr delete {{ vm.key }}-0 --force"
-      register: rep_del
-      changed_when: rep_del.rc == 0
-      failed_when: rep_del.rc not in [0, 255]   # 255 == job does not exist
-
-    - name: Remove stale replicated volumes for VM-{{ vm.key }} on {{ replication_target.host }}
+    - name: Delete existing replication job(s) for VM-{{ vm.key }}
       ansible.builtin.shell: >-
         set -o pipefail;
-        pvesm list {{ replication_target.pool }} --vmid {{ vm.key }} 2>/dev/null
+        pvesr status 2>/dev/null | awk '$1 ~ /^{{ vm.key }}-/ {print $1}'
+        | xargs -r -n1 -I{} pvesr delete {} --force
+      args:
+        executable: /bin/bash
+      changed_when: true
+      failed_when: false
+
+    - name: Free stale VM-{{ vm.key }} replicas on other nodes
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        pvesm list {{ vm.value.storage | default(vm_localstorage) }} --vmid {{ vm.key }} 2>/dev/null
         | awk 'NR>1 {print $1}'
         | xargs -r -n1 pvesm free
       args:
         executable: /bin/bash
-      delegate_to: "{{ replication_target.host }}"
+      delegate_to: "{{ target_node }}"
       changed_when: true
       failed_when: false
-      with_items: "{{ vm.value.replication_targets }}"
+      loop: "{{ groups['proxmox'] | difference([inventory_hostname]) }}"
       loop_control:
-        loop_var: replication_target
+        loop_var: target_node
+        label: "{{ target_node }}"
 
 - name: Get replication configuration VM-{{ vm.key }}
   ansible.builtin.command: >-

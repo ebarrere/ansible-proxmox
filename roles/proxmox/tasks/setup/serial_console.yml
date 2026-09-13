@@ -9,14 +9,19 @@
     line: 'GRUB_CMDLINE_LINUX="console=tty1 console={{ serial_console_tty }},{{ serial_console_speed }}n8"'
   notify: Update GRUB
 
+# GRUB drives the UART itself (terminal "serial", not "console serial"): the
+# M910q firmware already mirrors its EFI console to COM2 via the pre-boot
+# redirection, so "console serial" would double-write the port. Driving serial
+# directly also renders the menu in clean ASCII line-drawing instead of the
+# firmware's VT-UTF8 (which garbles a non-UTF-8 terminal).
 - name: Serial console - show the GRUB menu on serial too
   ansible.builtin.lineinfile:
     path: /etc/default/grub
     regexp: "^{{ item.key }}="
     line: '{{ item.key }}="{{ item.value }}"'
   loop:
-    - {key: GRUB_TERMINAL, value: "console serial"}
-    - {key: GRUB_SERIAL_COMMAND, value: "serial --unit={{ serial_console_unit }} --speed={{ serial_console_speed }}"}
+    - {key: GRUB_TERMINAL, value: "serial"}
+    - {key: GRUB_SERIAL_COMMAND, value: "serial --unit={{ serial_console_unit }} --speed={{ serial_console_speed }} --word=8 --parity=no --stop=1"}
   notify: Update GRUB
 
 - name: Serial console - enable login getty on {{ serial_console_tty }}

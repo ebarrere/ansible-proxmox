@@ -19,8 +19,8 @@
   loop_control:
     label: "{{ item.filename }}"
   with_items:
-    - { filename: pve, repo: "deb https://enterprise.proxmox.com/debian/pve bookworm pve-enterprise" }
-    - { filename: ceph, repo: "deb https://enterprise.proxmox.com/debian/ceph-{{ ceph_release }} bookworm enterprise" }
+    - { filename: pve, repo: "deb https://enterprise.proxmox.com/debian/pve {{ debian_version }} pve-enterprise" }
+    - { filename: ceph, repo: "deb https://enterprise.proxmox.com/debian/ceph-{{ ceph_release }} {{ debian_version }} enterprise" }
 
 - name: Add no-subscription repositories
   ansible.builtin.apt_repository:
@@ -31,5 +31,5 @@
   loop_control:
     label: "{{ item.filename }}"
   with_items:
-    - { filename: pve-no-subscription, repo: "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" }
-    - { filename: "ceph-{{ ceph_release }}-no-subscription", repo: "deb http://download.proxmox.com/debian/ceph-{{ ceph_release }} bookworm no-subscription" }
+    - { filename: pve-no-subscription, repo: "deb http://download.proxmox.com/debian/pve {{ debian_version }} pve-no-subscription" }
+    - { filename: "ceph-{{ ceph_release }}-no-subscription", repo: "deb http://download.proxmox.com/debian/ceph-{{ ceph_release }} {{ debian_version }} no-subscription" }

@@ -18,6 +18,10 @@
   ansible.builtin.import_tasks: update.yml
   tags: bootstrap
 
+- name: Remove stock Debian kernel (keeps dist-upgrade from dropping proxmox-ve)
+  ansible.builtin.import_tasks: remove_debian_kernel.yml
+  tags: bootstrap
+
 - name: Disable Proxmox Subscription prompt
   ansible.builtin.import_tasks: disable_subscription_prompt.yml
   when: disable_no_subscription_prompt

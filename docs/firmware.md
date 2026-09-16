@@ -71,6 +71,23 @@ Homelab hardware settings:
 
 To read a value instead of writing it, omit `=`: `setup_var.efi Setup:0x1033`.
 
+## Boot order is NOT a `setup_var` offset
+
+Boot device order (the Setup "Startup → Primary Boot Sequence") is **not** in the
+`Setup` varstore, so `setup_var.efi` / the m910q pre-boot image cannot set it.
+Confirmed two ways: (1) reordering it and saving leaves the `Setup` variable
+byte-identical; (2) the Setup driver IFR (extract with UEFIExtract + ifrextractor
+on `899407D7-…_Setup`) shows the boot forms bound to separate varstores —
+`BootOrder` (GUID `8BE4DF61-…`, the UEFI order) and `LegacyDevOrder`
+(GUID `A56074DB-…`, the CSM device-class order) — not `Setup`.
+
+Since the nodes boot UEFI, we set the UEFI **`BootOrder`** on the installed host
+with **`efibootmgr`** (`configure_uefi_boot_order`, on by default): the proxmox
+role orders it **internal disk / OS → USB → network last** via
+`roles/proxmox/files/set_uefi_boot_order.py` (idempotent). This runs post-install
+where the nvme OS boot entry actually exists. (CSM, Boot Mode and Boot Priority
+*are* `Setup` offsets — e.g. CSM at `Setup:0x1056` — if you ever want them pinned.)
+
 ## Physical serial wiring
 
 The board has two internal serial headers, **COM1** and **COM2** (keyed). On

@@ -9,6 +9,10 @@ serial_console_tty: ttyS1
 serial_console_speed: 115200
 serial_console_unit: 1
 
+# UEFI boot order (nvme/OS -> USB -> network last) via efibootmgr. Not settable
+# by the m910q pre-boot image (boot order is not in the AMI Setup varstore).
+configure_uefi_boot_order: false
+
 switch_to_community_updates_repo: true
 disable_no_subscription_prompt: true
 install_pve_discord_dark_theme: true

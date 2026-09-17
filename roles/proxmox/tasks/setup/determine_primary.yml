@@ -4,10 +4,35 @@
 # rebuilt node (e.g. when pve1 -- the alphabetical first -- is the one being
 # replaced). On a genuine fresh build (no members yet) fall back to the
 # alphabetically-first node, which becomes the cluster creator.
-- name: Determine primary | Probe each node's cluster membership
+#
+# Reachability is checked from the controller FIRST: a host that is in inventory
+# but not built yet (a new node awaiting its install) would otherwise make the
+# delegated probe "unreachable", which aborts every later run_once task.
+- name: Determine primary | Which nodes answer on SSH?
+  run_once: true
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  # ignore_errors (not failed_when:false) so a down host is recorded as failed
+  # and can be filtered out below.
+  ignore_errors: true
+  check_mode: false
+  loop: "{{ groups['proxmox'] | sort }}"
+  register: primary_reachable
+  ansible.builtin.wait_for:
+    host: "{{ hostvars[item].ansible_host | default(item) }}"
+    port: 22
+    timeout: 3
+
+- name: Determine primary | Reachable nodes
+  run_once: true
+  ansible.builtin.set_fact:
+    proxmox_up: "{{ primary_reachable.results | rejectattr('failed', 'equalto', true) | map(attribute='item') | list }}"
+
+- name: Determine primary | Probe each reachable node's cluster membership
   run_once: true
   delegate_to: "{{ item }}"
-  loop: "{{ groups['proxmox'] | sort }}"
+  loop: "{{ proxmox_up }}"
   register: primary_probe
   changed_when: false
   failed_when: false
@@ -28,4 +53,6 @@
 - name: Determine primary | Show the chosen primary
   run_once: true
   ansible.builtin.debug:
-    msg: "cluster primary = {{ proxmox_primary }} (quorate members: {{ proxmox_members | default([]) }})"
+    msg: >-
+      cluster primary = {{ proxmox_primary }} (quorate: {{ proxmox_members | default([]) }},
+      unreachable: {{ groups['proxmox'] | difference(proxmox_up) }})

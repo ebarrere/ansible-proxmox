@@ -46,7 +46,7 @@
 
 - name: Determine cluster primary (a healthy member, not a down/rebuilt node)
   ansible.builtin.import_tasks: determine_primary.yml
-  tags: [cluster, ceph]
+  tags: [cluster, ceph, qdevice]
 
 - name: Create cluster
   ansible.builtin.import_tasks: create_cluster.yml

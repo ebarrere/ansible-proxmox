@@ -35,14 +35,14 @@
         port: 5403
         timeout: 5
       register: qd_reachable
-      failed_when: false
+      ignore_errors: true
       check_mode: false
 
     - name: QDevice | Skip (preconditions not met)
       ansible.builtin.debug:
         msg: >-
           QDevice SKIPPED: nodes={{ qd_nodes }} (even required),
-          quorate={{ qd_status.stdout is search('Quorate:\\s+Yes') }},
+          quorate={{ qd_status.stdout is search('Quorate:\s+Yes') }},
           already_configured={{ 'Qdevice' in qd_status.stdout }},
           qnetd_reachable={{ qd_reachable is not failed }}
       when: >-

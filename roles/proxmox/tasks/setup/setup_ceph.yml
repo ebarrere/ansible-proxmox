@@ -49,12 +49,15 @@
   stat:
     path: /var/lib/ceph/mon/ceph-{{ inventory_hostname }}
   register: mon_exists
-  when: inventory_hostname != proxmox_primary
+  when:
+    - inventory_hostname != proxmox_primary
+    - inventory_hostname in ceph_mon_hosts
 
 - name: Create Ceph monitors on remaining nodes
   command: pveceph mon create
   when:
     - inventory_hostname != proxmox_primary
+    - inventory_hostname in ceph_mon_hosts
     - not mon_exists.stat.exists
 
 - name: Check if manager exists on remaining nodes

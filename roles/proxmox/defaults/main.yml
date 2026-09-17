@@ -61,3 +61,7 @@ container_defaults:
 # replication job + stale target volumes before reconfiguring, so it re-clones
 # fresh. Needed after a VM is rebuilt (new disks won't match old replicas).
 force_replication_rebuild: false
+
+# Nodes that run a Ceph monitor. Keep this ODD (3 or 5) -- an even mon count
+# raises quorum without raising fault tolerance. Defaults to every proxmox node.
+ceph_mon_hosts: "{{ groups['proxmox'] }}"

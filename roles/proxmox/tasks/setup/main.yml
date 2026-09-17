@@ -53,6 +53,11 @@
   when: proxmox_create_cluster
   tags: cluster
 
+- name: Configure corosync QDevice (external tiebreaker vote)
+  ansible.builtin.import_tasks: setup_qdevice.yml
+  when: corosync_qdevice_host | default('') | length > 0
+  tags: [cluster, qdevice]
+
 - name: Mount storage
   ansible.builtin.import_tasks: add_storage.yml
   when: storage_classes is defined and storage_classes is mapping

@@ -65,3 +65,7 @@ force_replication_rebuild: false
 # Nodes that run a Ceph monitor. Keep this ODD (3 or 5) -- an even mon count
 # raises quorum without raising fault tolerance. Defaults to every proxmox node.
 ceph_mon_hosts: "{{ groups['proxmox'] }}"
+
+# External corosync QDevice (qnetd) host. Empty = no tiebreaker. Only applied to
+# an EVEN-node cluster; see tasks/setup/setup_qdevice.yml.
+corosync_qdevice_host: ""

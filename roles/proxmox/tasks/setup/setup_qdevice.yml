@@ -1,0 +1,70 @@
+---
+# Corosync QDevice: an external tiebreaker vote from a qnetd host (the Pi), so an
+# EVEN-node cluster isn't stuck at "quorum = n/2+1 tolerates only one failure".
+# 4 nodes + qdevice = 5 votes, quorum 3 -> survives losing two nodes.
+#
+# Only configured when the LIVE cluster has an even node count: Proxmox advises
+# against a QDevice on an odd cluster (it adds a vote without adding tolerance),
+# so this no-ops on the 3-node cluster and converges once the 4th host joins.
+# Requires the qnetd host to be up with corosync-qnetd + root SSH from the nodes
+# (both done by 01-bootstrap/pi-console/setup_pi_console.yml).
+
+- name: QDevice | Install corosync-qdevice
+  ansible.builtin.apt:
+    name: corosync-qdevice
+    state: present
+
+- name: QDevice | Ensure a root keypair exists (for SSH to the qnetd host)
+  ansible.builtin.command: ssh-keygen -t ed25519 -N '' -f /root/.ssh/id_ed25519
+  args:
+    creates: /root/.ssh/id_ed25519
+
+- name: QDevice | Configure the tiebreaker
+  run_once: true
+  delegate_to: "{{ proxmox_primary }}"
+  block:
+    - name: QDevice | Cluster state (node count, quorum, existing qdevice)
+      ansible.builtin.command: pvecm status
+      register: qd_status
+      changed_when: false
+      check_mode: false
+
+    - name: QDevice | Is the qnetd host reachable on 5403?
+      ansible.builtin.wait_for:
+        host: "{{ corosync_qdevice_host }}"
+        port: 5403
+        timeout: 5
+      register: qd_reachable
+      failed_when: false
+      check_mode: false
+
+    - name: QDevice | Skip (preconditions not met)
+      ansible.builtin.debug:
+        msg: >-
+          QDevice SKIPPED: nodes={{ qd_nodes }} (even required),
+          quorate={{ qd_status.stdout is search('Quorate:\\s+Yes') }},
+          already_configured={{ 'Qdevice' in qd_status.stdout }},
+          qnetd_reachable={{ qd_reachable is not failed }}
+      when: >-
+        (qd_nodes | int) % 2 != 0 or 'Qdevice' in qd_status.stdout
+        or qd_reachable is failed
+
+    # `pvecm qdevice setup` SSHes to root@qnetd and reconfigures corosync on every
+    # node, so it must not run on a cluster that is already inquorate.
+    - name: QDevice | Set up the qnetd tiebreaker
+      ansible.builtin.command: pvecm qdevice setup {{ corosync_qdevice_host }} -f
+      when:
+        - (qd_nodes | int) % 2 == 0
+        - "'Qdevice' not in qd_status.stdout"
+        - qd_reachable is not failed
+        - qd_status.stdout is search('Quorate:\s+Yes')
+      register: qd_setup
+
+    - name: QDevice | Verify the vote is counted
+      ansible.builtin.command: pvecm status
+      register: qd_verify
+      changed_when: false
+      failed_when: "'Qdevice' not in qd_verify.stdout"
+      when: qd_setup is changed
+  vars:
+    qd_nodes: "{{ qd_status.stdout | regex_search('Nodes:\\s+(\\d+)', '\\1') | first | default(0) }}"

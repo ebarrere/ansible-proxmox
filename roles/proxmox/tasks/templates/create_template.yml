@@ -1,22 +1,40 @@
 ---
-- name: Validate VM ID is not already in use
+# The host that owns the templates: the cluster primary for a member, the node
+# itself when standalone.
+- name: Template ownership, and any VM already holding this ID
+  ansible.builtin.set_fact:
+    _owns_templates: >-
+      {{ ((proxmox_create_cluster | bool) and inventory_hostname == (proxmox_primary | default(groups['proxmox'] | sort | first)))
+         or not (proxmox_create_cluster | bool) }}
+    _existing_vm: "{{ existing_vms | selectattr('vmid', 'equalto', template.key) | list | first | default({}) }}"
+
+- name: Refuse to clobber a real VM occupying the template ID
   ansible.builtin.fail:
-    msg: "VM ID {{ template.key }} is already in use by a VM that is not a template."
-  when: template.key in existing_vms | json_query('[].vmid') and existing_vms | json_query(query) != [1]
-  vars:
-    query: "[?vmid == `{{ template.key }}`].template"
+    msg: >-
+      VM ID {{ template.key }} is in use by '{{ _existing_vm.name | default('?') }}', which is not
+      this template. Move that VM or change the template ID.
+  when:
+    - _owns_templates | bool
+    - _existing_vm | length > 0
+    - (_existing_vm.template | default(0)) | int != 1
+    - (_existing_vm.name | default('')) not in [template.value.name, 'VM ' ~ template.key]
+
+# A run that dies part-way (e.g. the image download timing out) leaves an empty
+# shell at the template's ID, which then blocked every later run.
+- name: Reclaim an incomplete template left by a failed run
+  ansible.builtin.command: qm destroy {{ template.key }} --purge
+  register: _reclaimed_vm
+  changed_when: _reclaimed_vm.rc == 0
+  when:
+    - _owns_templates | bool
+    - _existing_vm | length > 0
+    - (_existing_vm.template | default(0)) | int != 1
+    - (_existing_vm.name | default('')) in [template.value.name, 'VM ' ~ template.key]
+
 - name: Create template if not exists
-  # Runs on the host that will own the template: the cluster primary for a
-  # member, the node itself when standalone. (The old form both delegated to the
-  # first proxmox host -- ignoring --limit and targeting a node the standalone
-  # host isn't clustered with -- and parsed as `(A and B) or not cluster`, which
-  # bypassed the "already exists" guard entirely on a standalone node.)
-  when: >-
-    template.key not in existing_vms | json_query('[].vmid') and
-    (
-      ((proxmox_create_cluster | bool) and inventory_hostname == (proxmox_primary | default(groups['proxmox'] | sort | first)))
-      or not (proxmox_create_cluster | bool)
-    )
+  when:
+    - _owns_templates | bool
+    - (_existing_vm | length == 0) or (_reclaimed_vm is defined and _reclaimed_vm is changed)
   block:
     - name: Create a new VM
       ansible.builtin.command: >

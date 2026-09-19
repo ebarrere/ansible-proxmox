@@ -8,12 +8,54 @@
 # Prints "changed: <old> -> <new>" or "unchanged: <order>" for Ansible changed_when.
 #
 # Test offline:  ./set_uefi_boot_order.py --stdin --dry-run < sample_efibootmgr_v.txt
+import glob
+import os
 import re
 import subprocess
 import sys
 
 
-def classify(label, path):
+def _norm(label):
+    l = (label or "").lower().strip()
+    if l.startswith("uefi:"):
+        l = l[5:].strip()
+    return l.split(",", 1)[0].strip()
+
+
+def removable_labels(entries):
+    """Labels of devices the firmware ALSO exposes as a UEFI USB entry, plus any
+    local USB block device. A CSM/BBS shadow entry for the same stick looks like
+    `Boot0010* SanDisk  BBS(HD,,0x0)` -- no USB marker at all -- so without this
+    it ranks as an internal disk and can outrank the real OS disk."""
+    out = set()
+    for _n, label, path in entries:
+        if "usb(" in (path or "").lower():
+            t = _norm(label)
+            if t:
+                out.add(t)
+    for dev in glob.glob("/sys/block/*/device"):
+        blk = dev.rsplit("/", 2)[1]
+        try:
+            if "/usb" not in os.path.realpath("/sys/block/" + blk):
+                continue
+            for attr in ("vendor", "model"):
+                try:
+                    v = open(os.path.join(dev, attr)).read().strip().lower()
+                except OSError:
+                    continue
+                if v:
+                    out.add(v)
+        except OSError:
+            continue
+    return out
+
+
+def _is_removable(label, removable):
+    l = _norm(label)
+    return bool(l) and any(t in l or l in t for t in removable)
+
+
+def classify(label, path, removable=frozenset()):
     """0 = internal disk/OS (first), 1 = USB, 2 = network (last)."""
     p = (path or "").lower()
     l = (label or "").lower()
@@ -22,6 +64,8 @@ def classify(label, path):
             or any(k in l for k in ("network", "pxe", "iba", "ip4", "ipv4", "ipv6"))):
         return 2
     if "usb(" in p or "usb" in l or "removable" in l:
+        return 1
+    if "bbs(" in p and _is_removable(label, removable):
         return 1
     return 0
 
@@ -50,7 +94,9 @@ def parse(out):
 def desired(entries, order):
     by = {n: (l, p) for n, l, p in entries}
     cur = [n for n in order if n in by]          # keep only live entries, in order
-    return sorted(cur, key=lambda n: (classify(*by[n]), os_rank(by[n][0]), cur.index(n)))
+    removable = removable_labels(entries)
+    return sorted(cur, key=lambda n: (classify(by[n][0], by[n][1], removable),
+                                      os_rank(by[n][0]), cur.index(n)))
 
 
 def main():

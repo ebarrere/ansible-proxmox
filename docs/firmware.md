@@ -81,11 +81,32 @@ on `899407D7-…_Setup`) shows the boot forms bound to separate varstores —
 `BootOrder` (GUID `8BE4DF61-…`, the UEFI order) and `LegacyDevOrder`
 (GUID `A56074DB-…`, the CSM device-class order) — not `Setup`.
 
-Since the nodes boot UEFI, we set the UEFI **`BootOrder`** on the installed host
-with **`efibootmgr`** (`configure_uefi_boot_order`, on by default): the proxmox
-role orders it **internal disk / OS → USB → network last** via
-`roles/proxmox/files/set_uefi_boot_order.py` (idempotent). This runs post-install
-where the nvme OS boot entry actually exists. (CSM, Boot Mode and Boot Priority
+**`efibootmgr` is not enough on this hardware.** The UEFI `BootOrder` variable is
+*derived*: the firmware rebuilds it at POST from its own Lenovo varstore, so an
+`efibootmgr -o` edit is silently reverted by the next boot (observed directly —
+an order set to disk-first read back USB-first after one reboot, untouched).
+
+The authoritative lists are the three Setup "Boot Sequence" screens, in varstore
+GUID `EF7EAE21-2830-4FB0-98AF-11960CADBB4B`:
+
+| Variable | Used for |
+|----------|----------|
+| `ExPrimaryBootOrder` | normal power-on |
+| `ExAutomaticBootOrder` | **wake-on-LAN / automatic power-on** — network first here is why a WoL wake PXE-boots |
+| `ExErrorBootOrder` | after a boot error |
+
+Each is 12 × 8-byte records: a class header (device id `0xFFFF`) followed by that
+class's concrete devices, e.g. `0041,000E` = HDD class → `Boot000E` (the nvme).
+Classes seen: `0x0041` HDD, `0x0012` USB, `0x0020` network. Reordering whole
+class groups is enough — `roles/proxmox/files/set_lenovo_boot_order.py` moves HDD
+first and network last (idempotent; asserts the result is a permutation of the
+original and backs the variable up to `/root/efivar-backup-*.bin` before writing).
+
+Gotcha: a USB stick registers as an **HD-class BBS device**, so under "HDD first"
+the firmware boots the first *hard disk* in that order — which can be the stick.
+
+`set_uefi_boot_order.py` (efibootmgr) is kept only for firmware with no Lenovo
+varstore. This runs post-install where the nvme OS boot entry actually exists. (CSM, Boot Mode and Boot Priority
 *are* `Setup` offsets — e.g. CSM at `Setup:0x1056` — if you ever want them pinned.)
 
 ## Physical serial wiring

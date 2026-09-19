@@ -67,8 +67,13 @@
   when: storage_classes is defined and storage_classes is mapping
   tags: storage
 
+# Ceph needs a cluster: a standalone node has nothing to join, and pveceph is
+# not installed there, so mon/mgr creation fails on a missing ceph-mgr binary.
 - name: Setup Ceph
   ansible.builtin.import_tasks: setup_ceph.yml
+  when:
+    - configure_ceph | bool
+    - proxmox_create_cluster | bool
   tags: ceph
 
 - name: Install NGINX

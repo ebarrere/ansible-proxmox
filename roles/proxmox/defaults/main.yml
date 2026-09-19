@@ -69,3 +69,6 @@ ceph_mon_hosts: "{{ groups['proxmox'] }}"
 # External corosync QDevice (qnetd) host. Empty = no tiebreaker. Only applied to
 # an EVEN-node cluster; see tasks/setup/setup_qdevice.yml.
 corosync_qdevice_host: ""
+
+# Hyper-converged Ceph. Requires a cluster; skipped on a standalone node.
+configure_ceph: true

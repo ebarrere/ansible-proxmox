@@ -58,6 +58,13 @@
       ansible.builtin.command: qm importdisk {{ template.key }} {{ downloaded_image.dest }} {{ template.value.storage }}
       changed_when: true
 
+    # importdisk has copied it into the storage; the image is ~200-600MB and the
+    # PVE root is small (Ceph's mon trips MON_DISK_LOW on a full root).
+    - name: Remove the downloaded cloud image
+      ansible.builtin.file:
+        path: "{{ downloaded_image.dest }}"
+        state: absent
+
     - name: Get VM configuration
       ansible.builtin.command: >
         pvesh get /nodes/{{ ansible_facts.hostname }}/qemu/{{ template.key }}/config --output-format json

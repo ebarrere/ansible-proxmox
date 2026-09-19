@@ -1,4 +1,13 @@
 ---
+# FIRST: later steps (proxmox install, serial console) notify the Reboot handler,
+# and a fresh host still has USB ahead of the disk -- so it would reboot back into
+# the install media mid-run. efibootmgr is in the base Debian repos, so this works
+# before the proxmox repo is added.
+- name: Configure UEFI boot order
+  ansible.builtin.import_tasks: boot_order.yml
+  when: configure_uefi_boot_order | bool
+  tags: boot-order
+
 - name: Add proxmox apt repo
   ansible.builtin.import_tasks: switch_to_community_updates_repo.yml
   when: install_proxmox | d(false)
@@ -30,11 +39,6 @@
   ansible.builtin.import_tasks: serial_console.yml
   when: configure_serial_console | bool
   tags: serial
-
-- name: Configure UEFI boot order
-  ansible.builtin.import_tasks: boot_order.yml
-  when: configure_uefi_boot_order | bool
-  tags: boot-order
 
 - name: Install Dark Theme
   ansible.builtin.import_tasks: install_pve_dark_theme.yml

@@ -23,12 +23,18 @@
         pvesh create /nodes/{{ ansible_facts.hostname }}/qemu --vmid {{ template.key }}
       changed_when: true
 
+    # factory.talos.dev builds the image on demand, so the first request can sit
+    # well past get_url's 10s default before any bytes arrive.
     - name: Get cloudimg {{ template.value.cloud_image_url }}
       ansible.builtin.get_url:
         url: "{{ template.value.cloud_image_url }}"
         dest: /tmp
         mode: 0755
+        timeout: "{{ cloud_image_timeout | default(300) }}"
       register: downloaded_image
+      until: downloaded_image is succeeded
+      retries: 3
+      delay: 15
 
     - name: Import the downloaded disk
       ansible.builtin.command: qm importdisk {{ template.key }} {{ downloaded_image.dest }} {{ template.value.storage }}

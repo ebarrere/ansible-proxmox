@@ -1,13 +1,15 @@
+# storage.cfg is cluster-wide for a member, but a standalone node (not joined
+# yet) keeps its own -- so configure the host being processed, and query the SAME
+# host we mutate. This previously ran run_once delegated to the first proxmox
+# host: it checked pve4's storage then ran pvesm on pve1, so the guard never
+# matched ("storage ID already defined") and --limit was ignored.
 - name: Configure Proxmox to use ZFS pools
   when: storage_classes.zfs is defined and storage_classes.zfs is mapping
-  delegate_to: "{{ groups['proxmox'] | sort | first }}"
-  run_once: true
   block:
-    - name: Get root password from Bitwarden # noqa: run-once[task]
+    - name: Get root password from Bitwarden
       ansible.builtin.set_fact:
         root_password: "{{ lookup('community.general.bitwarden', 'proxmox_root', field='password')[0] }}"
       # no_log: true
-      run_once: true
 
     - name: Get existing Proxmox storage
       community.general.proxmox_storage_info:
@@ -26,7 +28,9 @@
         --content {{ item.value.content }} --shared=1
       with_items: "{{ storage_classes.zfs | dict2items }}"
       when: item.value.name not in proxmox_storages.proxmox_storages | map(attribute='storage')
-      changed_when: true
+      register: _add_dir
+      changed_when: _add_dir.rc == 0
+      failed_when: _add_dir.rc != 0 and 'already defined' not in _add_dir.stderr
 
     - name: Update storage content types
       ansible.builtin.command: >
@@ -50,4 +54,6 @@
         --pool {{ item.value.name }}
       with_items: "{{ storage_classes.zfs | dict2items }}"
       when: item.value.name + '-zfs' not in proxmox_storages.proxmox_storages | map(attribute='storage')
-      changed_when: true
+      register: _add_zfs
+      changed_when: _add_zfs.rc == 0
+      failed_when: _add_zfs.rc != 0 and 'already defined' not in _add_zfs.stderr

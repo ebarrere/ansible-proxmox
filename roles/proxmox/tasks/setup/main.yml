@@ -65,6 +65,7 @@
 - name: Mount storage
   ansible.builtin.import_tasks: add_storage.yml
   when: storage_classes is defined and storage_classes is mapping
+  tags: storage
 
 - name: Setup Ceph
   ansible.builtin.import_tasks: setup_ceph.yml

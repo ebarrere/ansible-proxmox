@@ -1,10 +1,19 @@
 ---
+# Replication targets are cluster members, so a standalone node has nothing to
+# replicate to -- pvesr fails with "Target '<node>' does not exist".
+- name: Replication | is this node in a cluster?
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: repl_clustered
+
 # When force_replication_rebuild=true, nuke this VM's replication job(s) and
 # every off-node replica of its disks, so the job below re-clones fresh. Needed
 # after a VM is rebuilt: its new disks share no snapshot with the old replicas,
 # so sync fails with "no common base snapshot / volume already exists".
 - name: Force-rebuild replication VM-{{ vm.key }}
-  when: force_replication_rebuild | default(false) | bool
+  when:
+    - repl_clustered.stat.exists
+    - force_replication_rebuild | default(false) | bool
   block:
     - name: Delete existing replication job(s) for VM-{{ vm.key }}
       ansible.builtin.shell: >-
@@ -38,13 +47,16 @@
   changed_when: false
   failed_when: replication_config.rc not in [0, 255]
   register: replication_config
+  when: repl_clustered.stat.exists
 
 - name: Configure replication VM-{{ vm.key }}
   ansible.builtin.command: >-
     pvesr create-local-job {{ vm.key }}-0 {{ replication_target.host }} --schedule "{{ replication_target.schedule | default('daily') }}" \
     --rate {{ replication_target.rate | default('10') }}
   changed_when: true
-  when: replication_config.rc == 255
+  when:
+    - repl_clustered.stat.exists
+    - (replication_config.rc | default(0)) == 255
   with_items: "{{ vm.value.replication_targets }}"
   loop_control:
     loop_var: replication_target

@@ -1,11 +1,10 @@
 ---
-# UEFI boot order: internal disk / OS first, then USB, then network last.
-# Unlike serial/VT-x/power (AMI `Setup` varstore, baked in by the m910q pre-boot
-# image), boot order lives in the EFI `BootOrder` variable -- firmware-confirmed
-# via the Setup driver IFR (varstores BootOrder/LegacyDevOrder, GUIDs 8BE4DF61 /
-# A56074DB, not `Setup`). setup_var.efi is `Setup`-only, so it cannot set it; we
-# do it here on the installed host, where the nvme OS boot entry exists.
-# See 02-proxmox/docs/firmware.md.
+# Boot order: internal disk first, network last (so a WoL wake doesn't PXE).
+#
+# On the M910q the UEFI BootOrder variable is DERIVED -- the firmware rebuilds it
+# at POST from its own Lenovo varstore, so efibootmgr edits do not survive a
+# reboot. The authoritative lists are ExPrimaryBootOrder (power-on) and
+# ExAutomaticBootOrder (wake-on-LAN). See 02-proxmox/docs/firmware.md.
 - name: Boot order - ensure efibootmgr is installed
   ansible.builtin.apt:
     name: efibootmgr
@@ -16,8 +15,26 @@
     path: /sys/firmware/efi
   register: _efi_dir
 
-- name: Boot order - set nvme -> USB -> network (idempotent)
+- name: Boot order - does this firmware expose the Lenovo boot sequences?
+  ansible.builtin.find:
+    paths: /sys/firmware/efi/efivars
+    patterns: "ExPrimaryBootOrder-*"
+    file_type: any
+  register: _lenovo_bootvars
+  when: _efi_dir.stat.exists
+
+- name: Boot order - Lenovo boot sequences, disk first / network last (authoritative)
+  ansible.builtin.script: set_lenovo_boot_order.py
+  register: _lenovo_boot_order
+  changed_when: "_lenovo_boot_order.stdout is match('changed:')"
+  when:
+    - _efi_dir.stat.exists
+    - (_lenovo_bootvars.matched | default(0)) > 0
+
+- name: Boot order - UEFI BootOrder (firmware without the Lenovo varstore)
   ansible.builtin.script: set_uefi_boot_order.py
   register: _uefi_boot_order
   changed_when: "_uefi_boot_order.stdout is match('changed:')"
-  when: _efi_dir.stat.exists
+  when:
+    - _efi_dir.stat.exists
+    - (_lenovo_bootvars.matched | default(0)) == 0

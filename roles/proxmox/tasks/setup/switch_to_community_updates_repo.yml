@@ -1,4 +1,23 @@
 ---
+# PVE 9 ships the enterprise repo as a deb822 .sources file, which the
+# apt_repository removals below (list format) don't touch -- it then 401s on
+# every apt update, so it must go FIRST, before any apt cache refresh.
+- name: Find deb822 enterprise repo files
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep -rlE 'enterprise\.proxmox\.com' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+  args:
+    executable: /bin/bash
+  register: pve_enterprise_sources
+  changed_when: false
+  check_mode: false
+
+- name: Remove deb822 enterprise repositories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ pve_enterprise_sources.stdout_lines }}"
+
 - name: Ensure ca-certificates is installed
   ansible.builtin.apt:
     name: ca-certificates

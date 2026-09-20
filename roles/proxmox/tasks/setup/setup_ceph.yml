@@ -4,8 +4,13 @@
     ceph_ips: "{{ groups['proxmox'] | map('extract', hostvars, 'host_networks') | flatten() | selectattr('tags', 'defined') | selectattr('tags', 'equalto', 'ceph_network') | map(attribute='address') | list }}"
     ceph_network: "{{ host_networks | selectattr('tags', 'defined') | selectattr('tags', 'equalto', 'ceph_network') | map(attribute='address') | map('regex_replace', '[0-9]+$', '0/24') | first }}"
 
+# ceph-mgr, not ceph: /usr/bin/ceph comes from ceph-common, which arrives as a
+# dependency of pve-manager, so `ceph --version` succeeds on a node that has
+# never run `pveceph install`. That false positive skipped the install and left
+# the later tasks to fail on "binary not installed: /usr/bin/ceph-mgr". The
+# server binaries only exist once pveceph install has run.
 - name: Check if Ceph is installed
-  command: ceph --version
+  command: ceph-mgr --version
   register: ceph_installed
   changed_when: false
   failed_when: false

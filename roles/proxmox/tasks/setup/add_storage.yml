@@ -32,6 +32,25 @@
       changed_when: _add_dir.rc == 0
       failed_when: _add_dir.rc != 0 and 'already defined' not in _add_dir.stderr
 
+    # A storage created before this node joined keeps the --nodes list it was
+    # made with, so a later member is locked out of it entirely:
+    #   storage 'nvme-pool' is not available on node 'pve4'
+    # Add this host to the existing list rather than recreating the storage,
+    # and leave unrestricted storages alone.
+    - name: Ensure node-restricted storage includes this host
+      ansible.builtin.shell: |
+        set -o pipefail
+        cur=$(awk '/^[a-z]+: {{ item.value.name }}$/{f=1; next} /^[a-z]+: /{f=0} f && $1=="nodes" {print $2; exit}' /etc/pve/storage.cfg)
+        [ -z "$cur" ] && exit 0
+        echo "$cur" | tr ',' '\n' | grep -qx '{{ inventory_hostname }}' && exit 0
+        pvesm set {{ item.value.name }} --nodes "$cur,{{ inventory_hostname }}"
+        echo CHANGED
+      args:
+        executable: /bin/bash
+      with_items: "{{ storage_classes.zfs | dict2items }}"
+      register: _storage_nodes
+      changed_when: "'CHANGED' in _storage_nodes.stdout"
+
     - name: Update storage content types
       ansible.builtin.command: >
         pvesm set {{ item.value.name }} \

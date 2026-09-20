@@ -18,9 +18,16 @@
     state: absent
   loop: "{{ pve_enterprise_sources.stdout_lines }}"
 
-- name: Ensure ca-certificates is installed
+# gnupg because ansible.builtin.apt_repository shells out to apt-key/gpg, and
+# trixie has neither: Debian 13's apt depends on sqv (Sequoia) instead of gpgv,
+# so a minimal install carries no gpg at all. Bookworm's apt pulled gnupg in,
+# which is why this only shows up on a freshly installed PVE 9 node and not on
+# one upgraded from PVE 8.
+- name: Ensure ca-certificates and gnupg are installed
   ansible.builtin.apt:
-    name: ca-certificates
+    name:
+      - ca-certificates
+      - gnupg
     state: present
 
 - name: Download Proxmox GPG key

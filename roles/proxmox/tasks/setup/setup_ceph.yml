@@ -122,6 +122,14 @@
       register: ceph_user_result
       changed_when: false
 
+    - name: Get Ceph monitors
+      # From the monmap, not every node's ceph IP: a node can carry an OSD
+      # without a mon (pve4 does), and advertising a non-mon address just makes
+      # clients fail over to it for nothing.
+      command: ceph mon dump -f json
+      register: ceph_mon_dump
+      changed_when: false
+
     - name: Format Ceph data
       set_fact:
         ceph_data:
@@ -131,8 +139,8 @@
           # so their stdout is empty and from_json would blow up
           ceph_fsid: "{{ ceph_fsid_result.stdout | default('', true) | trim }}"
           ceph_k8s_key: "{{ (ceph_user_result.stdout | default('[{}]', true) | from_json)[0].key | default('') }}"
-          # ceph_monitors: "{{ groups['proxmox'] | map('extract', hostvars, 'ansible_default_ipv4') | map(attribute='address') | map('regex_replace', '^(.*)$', '\\1:6789') | list }}"
-          ceph_monitors: "{{ ceph_ips | map('regex_replace', '^(.*)$', '\\1:6789') | list }}"
+          ceph_monitors: "{{ (ceph_mon_dump.stdout | default('{\"mons\": []}', true) | from_json).mons
+                              | map(attribute='public_addr') | map('regex_replace', '/.*$', '') | sort | list }}"
 
 - name: Write Ceph data to a local file
   become: false

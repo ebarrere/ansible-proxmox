@@ -1,0 +1,63 @@
+---
+# Applied live and persisted, so no reboot is needed.
+- name: ZFS ARC max (persisted)
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/zfs.conf
+    content: "options zfs zfs_arc_max={{ zfs_arc_max_mb * 1048576 }}\n"
+    mode: '0644'
+  when: zfs_arc_max_mb | int > 0
+  register: zfs_conf
+
+- name: ZFS ARC max (initramfs copy)
+  ansible.builtin.command: update-initramfs -u
+  when: zfs_conf is changed
+
+- name: ZFS ARC max (live)
+  ansible.builtin.shell: |
+    f=/sys/module/zfs/parameters/zfs_arc_max
+    [ ! -e $f ] && exit 0
+    [ "$(cat $f)" = "{{ zfs_arc_max_mb * 1048576 }}" ] && exit 0
+    echo {{ zfs_arc_max_mb * 1048576 }} > $f && echo changed
+  register: zfs_live
+  changed_when: "'changed' in zfs_live.stdout"
+  when: zfs_arc_max_mb | int > 0
+
+- name: Ceph OSD memory target
+  # Cluster-wide config db, so once; OSDs pick it up live.
+  ansible.builtin.shell: |
+    want={{ ceph_osd_memory_target_mb * 1048576 }}
+    [ "$(ceph config get osd osd_memory_target)" = "$want" ] && exit 0
+    ceph config set osd osd_memory_target $want && echo changed
+  register: osd_mem
+  changed_when: "'changed' in osd_mem.stdout"
+  run_once: true
+  when:
+    - ceph_osd_memory_target_mb | int > 0
+    - configure_ceph | bool
+
+- name: KSM | Install ksmtuned
+  ansible.builtin.apt:
+    name: ksm-control-daemon
+    state: present
+  when: ksm_enable | bool
+
+- name: KSM | Merge threshold
+  ansible.builtin.lineinfile:
+    path: /etc/ksmtuned.conf
+    regexp: '^#?\s*KSM_THRES_COEF='
+    line: "KSM_THRES_COEF={{ ksm_thres_coef }}"
+  when: ksm_enable | bool
+  register: ksm_conf
+
+- name: KSM | Enable ksmtuned
+  ansible.builtin.systemd:
+    name: ksmtuned
+    enabled: "{{ ksm_enable | bool }}"
+    state: "{{ (ksm_enable | bool) | ternary('started', 'stopped') }}"
+  when: ksm_enable | bool or 'ksmtuned' in ansible_facts.services | default({})
+
+- name: KSM | Restart ksmtuned on config change
+  ansible.builtin.systemd:
+    name: ksmtuned
+    state: restarted
+  when: ksm_enable | bool and ksm_conf is changed

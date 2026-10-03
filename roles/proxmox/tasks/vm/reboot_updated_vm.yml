@@ -7,13 +7,26 @@
   register: pending_changes_response
 
 - name: Reboot VM if changes pending VM-{{ vm.key }}
+  # One VM at a time cluster-wide, and wait for its guest agent before the next:
+  # a parallel run would reboot every Talos control plane at once (etcd quorum).
+  # vm_reboot_settle adds time for the guest's services after the agent answers.
   vars:
     changes_pending: "{{ pending_changes_response.stdout | from_json | \
       json_query('[].[pending, delete] | []') | length > 0 }}"
-  ansible.builtin.command: >-
-    pvesh create /nodes/{{ ansible_facts.hostname }}/qemu/{{ vm.key }}/status/reboot
-    --timeout {{ vm_restart_timeout }}
+  throttle: 1
+  ansible.builtin.shell: |
+    pvesh create /nodes/{{ ansible_facts.hostname }}/qemu/{{ vm.key }}/status/reboot --timeout {{ vm_restart_timeout }} 2>&1 \
+      || { rc=$?; [ $rc -eq 2 ] || exit $rc; }
+    qm config {{ vm.key }} | grep -q '^agent: 1' || exit 0
+    qm status {{ vm.key }} | grep -q running || exit 0
+    for i in $(seq {{ vm_restart_timeout }}); do
+      qm agent {{ vm.key }} ping >/dev/null 2>&1 && { sleep {{ vm_reboot_settle }}; exit 0; }
+      sleep 1
+    done
+    echo "VM {{ vm.key }}: guest agent not back after {{ vm_restart_timeout }}s" >&2; exit 1
+  args:
+    executable: /bin/bash
   when: changes_pending
   register: reboot_response
-  failed_when: reboot_response.rc not in [0, 2] and "not running" not in reboot_response.stderr
+  failed_when: reboot_response.rc != 0 and "not running" not in reboot_response.stdout
   changed_when: true

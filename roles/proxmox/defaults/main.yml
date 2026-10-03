@@ -27,6 +27,9 @@ vm_remove_unreferenced: true
 container_remove_unreferenced: true
 
 vm_restart_timeout: 240
+# After a pending-change reboot, wait this long past the guest agent answering
+# before rebooting the next VM (lets e.g. etcd rejoin).
+vm_reboot_settle: 30
 
 vm_defaults_agent: true
 vm_defaults_bios: seabios
@@ -72,6 +75,17 @@ corosync_qdevice_host: ""
 
 # Hyper-converged Ceph. Requires a cluster; skipped on a standalone node.
 configure_ceph: true
+
+# Host memory caps, in MiB; 0 = leave the upstream default. Without them a
+# swapless host with hyper-converged Ceph + ZFS can overcommit: the ARC defaults
+# to ~all RAM and osd_memory_target to 4 GiB (more during recovery), and the
+# kernel OOM-kills the biggest VM. See tasks/setup/memory_limits.yml.
+zfs_arc_max_mb: 0
+ceph_osd_memory_target_mb: 0
+# ksmtuned: merge identical guest pages (e.g. same-OS VMs) under memory
+# pressure -- by default once free memory drops below ksm_thres_coef percent.
+ksm_enable: false
+ksm_thres_coef: 20
 
 # Per-request timeout for template cloud images (the Talos factory builds on demand).
 cloud_image_timeout: 300

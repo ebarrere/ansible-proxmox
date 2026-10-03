@@ -1,0 +1,54 @@
+---
+# One bootloader on the ESP: Proxmox's. The Debian installer's /EFI/debian is
+# never updated once PVE installs its grub to /EFI/proxmox, so the stale core
+# fails on PVE's /boot/grub modules ("symbol ... not found") whenever the
+# firmware picks it -- which the M910q did after a power loss, having dropped
+# the proxmox entry. Also install to the removable path (/EFI/BOOT/BOOTX64.EFI)
+# and keep it updated, so the firmware's generic disk entry boots the same grub.
+- name: EFI bootloader | Proxmox grub present?
+  ansible.builtin.stat:
+    path: /boot/efi/EFI/proxmox/grubx64.efi
+  register: _pve_grub
+
+- name: EFI bootloader | Keep the removable copy updated on grub upgrades
+  ansible.builtin.debconf:
+    name: grub-efi-amd64
+    question: grub2/force_efi_extra_removable
+    vtype: boolean
+    value: "true"
+  register: _removable_debconf
+  when: _pve_grub.stat.exists
+
+- name: EFI bootloader | Removable copy present?
+  ansible.builtin.stat:
+    path: /boot/efi/EFI/BOOT/grubx64.efi
+  register: _removable
+  when: _pve_grub.stat.exists
+
+- name: EFI bootloader | Reinstall grub (Proxmox + removable path)
+  ansible.builtin.command: dpkg-reconfigure -f noninteractive grub-efi-amd64
+  when:
+    - _pve_grub.stat.exists
+    - _removable_debconf is changed or not _removable.stat.exists
+
+- name: EFI bootloader | Verify the removable copy before removing anything
+  ansible.builtin.command: cmp /boot/efi/EFI/proxmox/grubx64.efi /boot/efi/EFI/BOOT/grubx64.efi
+  changed_when: false
+  when: _pve_grub.stat.exists
+
+- name: EFI bootloader | Remove firmware entries for the stale Debian loader
+  ansible.builtin.shell: |
+    set -o pipefail
+    ids=$(efibootmgr | grep -iE 'EFI.DEBIAN.' | sed -nE 's/^Boot([0-9A-F]{4}).*/\1/p')
+    for id in $ids; do efibootmgr -q -b "$id" -B && echo "removed Boot$id"; done
+  args:
+    executable: /bin/bash
+  register: _debian_entries
+  changed_when: _debian_entries.stdout | length > 0
+  when: _pve_grub.stat.exists
+
+- name: EFI bootloader | Remove the stale Debian loader
+  ansible.builtin.file:
+    path: /boot/efi/EFI/debian
+    state: absent
+  when: _pve_grub.stat.exists

@@ -31,6 +31,11 @@
   ansible.builtin.import_tasks: remove_debian_kernel.yml
   tags: bootstrap
 
+# After the install: it acts only once PVE's grub is on the ESP.
+- name: EFI bootloader (Proxmox grub only, plus the removable fallback)
+  ansible.builtin.import_tasks: efi_bootloader.yml
+  tags: [boot-order, efi]
+
 - name: Disable Proxmox Subscription prompt
   ansible.builtin.import_tasks: disable_subscription_prompt.yml
   when: disable_no_subscription_prompt

@@ -31,10 +31,22 @@
     - (_existing_vm.template | default(0)) | int != 1
     - (_existing_vm.name | default('')) in [template.value.name, 'VM ' ~ template.key]
 
+# A template is only built when absent, so a version bump never refreshes it.
+- name: Destroy the existing template for a forced rebuild
+  ansible.builtin.command: qm destroy {{ template.key }} --purge
+  register: _rebuilt_vm
+  changed_when: _rebuilt_vm.rc == 0
+  when:
+    - _owns_templates | bool
+    - force_template_rebuild | bool
+    - _existing_vm | length > 0
+
 - name: Create template if not exists
   when:
     - _owns_templates | bool
-    - (_existing_vm | length == 0) or (_reclaimed_vm is defined and _reclaimed_vm is changed)
+    - (_existing_vm | length == 0)
+      or (_reclaimed_vm is defined and _reclaimed_vm is changed)
+      or (_rebuilt_vm is defined and _rebuilt_vm is changed)
   block:
     - name: Create a new VM
       ansible.builtin.command: >

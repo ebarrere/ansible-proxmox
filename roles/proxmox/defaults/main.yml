@@ -75,3 +75,8 @@ configure_ceph: true
 
 # Per-request timeout for template cloud images (the Talos factory builds on demand).
 cloud_image_timeout: 300
+
+# Rebuild VM templates even when they already exist, and re-download their ISOs.
+# Needed after a Talos version bump: the template is only created when absent and
+# the ISO filename is identical across versions, so neither refreshes on its own.
+force_template_rebuild: false

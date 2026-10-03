@@ -14,13 +14,26 @@
       "{{ existing_iso_files.stdout | from_json | json_query('[].volid') | map('basename') }}"
   when: iso_names | length > 0
   block:
+    # The Talos ISO keeps the same filename across versions, so the guard below
+    # would never re-fetch it after a version bump. Drop it first when forced.
+    - name: Drop ISO images for a forced rebuild Storage {{ storage_config.key }}
+      ansible.builtin.command: >-
+        pvesh delete /nodes/{{ ansible_facts.hostname }}/storage/{{ storage_config.key }}/content/{{ iso }}
+      when:
+        - force_template_rebuild | default(false) | bool
+        - iso | basename in iso_names
+      changed_when: true
+      with_items: "{{ existing_iso_files.stdout | from_json | json_query('[].volid') }}"
+      loop_control:
+        loop_var: iso
+
     - name: Download ISO images Storage {{ storage_config.key }}
       ansible.builtin.command: >-
         pvesh create /nodes/{{ ansible_facts.hostname }}/storage/{{ storage_config.key }}/download-url
         --content iso
         --filename {{ iso | basename }}
         --url {{ iso }}
-      when: iso | basename not in existing_iso_names
+      when: (iso | basename not in existing_iso_names) or (force_template_rebuild | default(false) | bool)
       changed_when: true
       with_items: "{{ storage_config.value.isos }}"
       loop_control:
